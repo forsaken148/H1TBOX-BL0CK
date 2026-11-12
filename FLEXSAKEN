@@ -1,220 +1,494 @@
 --[[
-    FLEX SAKEN - HITBOX PATCH (FIXED)
+═══════════════════════════════════════════════════════════════
+  FLEX ZONES MODULE  (Custom Zone / Rectangle / Preview)
+  Ported from SkidSaken and wired into FlexSaken's Auto Block.
 
-    PART 1: In your script, DELETE everything from the line
-              local BlockWatchers = {}
-            down to (and including) the end of
-              local function TriggerBlockWithHitbox(...) ... end
-            and paste PART 1 in its place.
-            Leave WatchKiller / SetAutoBlock exactly as they are.
+  INSTALL (3 edits in FlexSaken):
 
-    PART 2: Paste PART 2 right after the ESP block (the `do ... end` that
-            ends with the Gear ESP "Force Rescan" button), before
-            "-- MISC FEATURES".
+  [1] Right ABOVE the line:   local BlockWatchers = {}
+      add:                    local ZoneHook = nil
+
+  [2] Inside WatchKiller(), replace the whole `local function Trigger()` with:
+
+      local function Trigger()
+          if not State.AutoBlock then return end
+          if ZoneHook and ZoneHook(Killer) then return end   -- Zone modes handle it
+          if QueryHitbox then task.spawn(TriggerBlockWithHitbox, Killer, QueryHitbox) end
+      end
+
+  [3] Paste everything BELOW this comment block right after the
+      `SetAutoBlock` function (before "-- VisualCheck beam loop").
+
+  Optional (Auto Block Alt / attribute system): where it decides to block
+  for killer `k`, add first:   if ZoneHook and ZoneHook(k) then return end
+═══════════════════════════════════════════════════════════════
 ]]
 
--- ═══════════════════════════════════════════════════════════════
--- PART 1: HITBOX CORE (replaces old block)
--- ═══════════════════════════════════════════════════════════════
-local BlockWatchers = {}
+local TabZone = Window:Tab({ Title = "Zones", Icon = "square" })
 
--- FIX 1: Clean up any old folder from a previous inject before creating a new one
-local _oldFolder = workspace:FindFirstChild("FlexSakenHitboxes")
-if _oldFolder then _oldFolder:Destroy() end
-local HitboxFolder = Instance.new("Folder")
-HitboxFolder.Name = "FlexSakenHitboxes"
-HitboxFolder.Parent = workspace
-
--- Defaults (match the old hard-coded box: 5.2 x 6 x 5.65, offset 0,0,-3.5, x2.2)
-local HBDefaults = {
-    HitboxSizeX = 5.2, HitboxSizeY = 6, HitboxSizeZ = 5.65,
-    HitboxOffX = 0, HitboxOffY = 0, HitboxOffZ = -3.5,
-    HitboxScale = 2.2, HitboxWindow = 200,
-}
-local function HB(key)
-    -- FIX 2: Guard State being nil entirely
-    local v = (State ~= nil) and State[key] or nil
-    if type(v) ~= "number" then v = HBDefaults[key] end
-    return v
-end
-
-local function GetHitboxSize()
-    return Vector3.new(
-        math.max(0.1, HB("HitboxSizeX")),
-        math.max(0.1, HB("HitboxSizeY")),
-        math.max(0.1, HB("HitboxSizeZ"))
-    ) * HB("HitboxScale")
-end
-
-local function GetHitboxCFrame(QueryHitbox)
-    return QueryHitbox.CFrame * CFrame.new(HB("HitboxOffX"), HB("HitboxOffY"), HB("HitboxOffZ"))
-end
-
-local function GetLocalQueryHitbox()
-    if not LocalCharacter then return nil end
-    return LocalCharacter:FindFirstChild("QueryHitbox")
-end
-
--- FIX 3: Added explicit nil+validity guard on QueryHitbox
-local function IsInsideKillerHitbox(QueryHitbox)
-    if not QueryHitbox or not QueryHitbox.Parent then return false end
-    local LocalQuery = GetLocalQueryHitbox()
-    if not LocalQuery or not LocalQuery.Parent then return false end
-
-    local Params = OverlapParams.new()
-    Params.MaxParts = 1
-    Params.BruteForceAllSlow = true
-    Params.FilterType = Enum.RaycastFilterType.Include
-    Params.FilterDescendantsInstances = { LocalQuery }
-
-    -- FIX 4: pcall now always returns a clean boolean, no silent swallow
-    local ok, result = pcall(function()
-        return workspace:GetPartBoundsInBox(GetHitboxCFrame(QueryHitbox), GetHitboxSize(), Params)
-    end)
-    if not ok or type(result) ~= "table" then return false end
-    return #result > 0
-end
-
-local function TriggerBlockWithHitbox(Killer, QueryHitbox)
-    -- FIX 5: Guard State and DoBlock being nil
-    if not State then return end
-    if not State.AutoBlock or not LocalRoot then return end
-    if type(DoBlock) ~= "function" then return end
-
-    if not State.HitboxEnabled then
-        DoBlock(QueryHitbox)
-        return
-    end
-
-    if not GetLocalQueryHitbox() then return end
-    local Start = os.clock()
-    -- FIX 6: Use HB() so it respects the slider value properly
-    local Window = math.max(0.05, HB("HitboxWindow") / 1000)
-    while os.clock() - Start < Window do
-        -- Re-check AutoBlock each iteration in case user toggled it off mid-swing
-        if not State.AutoBlock or not QueryHitbox or not QueryHitbox.Parent then break end
-        if IsInsideKillerHitbox(QueryHitbox) then
-            DoBlock(QueryHitbox)
-            break
-        end
-        task.wait(0.02)
-    end
-end
-
--- Hitbox visualizer
-local HitboxVisuals = {}
-
--- FIX 7: GetVisual checks Parent AND that the part isn't destroyed
-local function GetVisual(Killer)
-    local V = HitboxVisuals[Killer]
-    if V and V.Parent and not V.Parent.Parent == nil then
-        -- still valid
-    else
-        V = Instance.new("Part")
-        V.Name = "FlexHitboxVisual"
-        V.Anchored = true
-        V.CanCollide = false
-        V.CanQuery = false
-        V.CanTouch = false
-        V.CastShadow = false
-        V.Material = Enum.Material.Neon
-        V.Transparency = 0.75
-        V.Color = Color3.fromRGB(220, 20, 60)
-        V.Parent = HitboxFolder
-        HitboxVisuals[Killer] = V
-    end
-    return V
-end
-
--- FIX 8: ClearVisuals collects keys first to avoid modifying table mid-iteration
-local function ClearVisuals()
-    local keys = {}
-    for k in pairs(HitboxVisuals) do keys[#keys+1] = k end
-    for _, k in ipairs(keys) do
-        pcall(function() HitboxVisuals[k]:Destroy() end)
-        HitboxVisuals[k] = nil
-    end
-end
-
-RunService.Heartbeat:Connect(function()
-    if not State or not State.ShowHitbox then
-        if next(HitboxVisuals) then ClearVisuals() end
-        return
-    end
-    -- FIX 9: Guard KillersFolder being nil before calling GetChildren
-    if not KillersFolder then
-        if next(HitboxVisuals) then ClearVisuals() end
-        return
-    end
-
-    local seen = {}
-    for _, Killer in ipairs(KillersFolder:GetChildren()) do
-        local QH = Killer:FindFirstChild("QueryHitbox")
-        if QH and QH:IsA("BasePart") then
-            seen[Killer] = true
-            local V = GetVisual(Killer)
-            V.Size = GetHitboxSize()
-            V.CFrame = GetHitboxCFrame(QH)
-            V.Color = IsInsideKillerHitbox(QH)
-                and Color3.fromRGB(0, 255, 0)
-                or  Color3.fromRGB(220, 20, 60)
-        end
-    end
-
-    -- Clean up visuals for killers that are gone
-    local deadKeys = {}
-    for Killer in pairs(HitboxVisuals) do
-        if not seen[Killer] then deadKeys[#deadKeys+1] = Killer end
-    end
-    for _, Killer in ipairs(deadKeys) do
-        pcall(function() HitboxVisuals[Killer]:Destroy() end)
-        HitboxVisuals[Killer] = nil
-    end
-end)
-
--- ═══════════════════════════════════════════════════════════════
--- PART 2: HITBOX TAB
--- ═══════════════════════════════════════════════════════════════
 do
-    local tabHB = Window:Tab({ Title = "Hitbox", Icon = "box" })
+    local PLAYER_R, ZONE_OFF, DIA_H, CIR_H = 1.5, 0.15, 3, 1
+    local RECT_THICK, RECT_HIT_DUR, RECT_SHOW_TRANS = 0.1, 0.4, 0.35
+    local COL_EDGE  = Color3.fromRGB(220, 20, 60)
+    local COL_MASS  = Color3.fromRGB(175, 30, 60)
+    local COL_ZONE  = Color3.fromRGB(255, 60, 60)
+    local COL_READY = Color3.fromRGB(80, 255, 80)
 
-    AddSection(tabHB, "Hitbox")
-    AddToggle(tabHB, "HitboxEnabled", "Enable Hitbox (Auto Block only inside it)", false)
+    local VisFolder = Instance.new("Folder")
+    VisFolder.Name = "FlexZoneVisuals"
+    VisFolder.Parent = workspace
 
-    AddSection(tabHB, "Visual")
-    AddToggle(tabHB, "ShowHitbox", "Show Hitbox (green = you're inside)", false)
+    local Boxes, ShowBoxes, Zones = {}, {}, {}
+    local Preview = { gui = nil, vp = nil, cam = nil, edges = {}, labels = {}, open = false }
 
-    AddSection(tabHB, "Size")
-    AddSlider(tabHB, "HitboxSizeX", "Width (X)",   1, 20, 5.2,  0.1)
-    AddSlider(tabHB, "HitboxSizeY", "Height (Y)",  1, 20, 6,    0.1)
-    AddSlider(tabHB, "HitboxSizeZ", "Length (Z)",  1, 20, 5.65, 0.1)
-    AddSlider(tabHB, "HitboxScale", "Size Multiplier", 0.5, 5, 2.2, 0.1)
+    -- ───────────────────────── helpers ─────────────────────────
+    local function IsLocalKiller()
+        RefreshFolders()
+        return LocalCharacter ~= nil and KillersFolder ~= nil and LocalCharacter:IsDescendantOf(KillersFolder)
+    end
+    local function ModeIs(m)
+        return State.AutoBlock == true and State.ZoneMode == m and not IsLocalKiller()
+    end
 
-    AddSection(tabHB, "Offset (relative to killer's facing)")
-    AddSlider(tabHB, "HitboxOffX", "Offset X (left/right)",       -15, 15, 0,    0.1)
-    AddSlider(tabHB, "HitboxOffY", "Offset Y (up/down)",          -15, 15, 0,    0.1)
-    AddSlider(tabHB, "HitboxOffZ", "Offset Z (forward=negative)", -20, 20, -3.5, 0.1)
+    local function ZoneFire(root)
+        if State.ZoneAbility == "007n7 Clone" then
+            if os.clock() - LastBlock < 0.05 then return end
+            LastBlock = os.clock()
+            FireAbility("Clone")
+        else
+            DoBlock(root)
+        end
+    end
 
-    AddSection(tabHB, "Auto Block Link")
-    AddSlider(tabHB, "HitboxWindow", "Check Window (ms)", 50, 600, 200, 10)
+    local function FlatLook(kr, y)
+        local lv = kr.CFrame.LookVector
+        local f = Vector3.new(lv.X, 0, lv.Z)
+        if f.Magnitude < 0.01 then f = Vector3.new(0, 0, -1) else f = f.Unit end
+        local p = Vector3.new(kr.Position.X, y, kr.Position.Z)
+        return CFrame.lookAt(p, p + f)
+    end
 
-    -- FIX 10: Reset now also resets HitboxEnabled and ShowHitbox toggles
-    AddButton(tabHB, "Reset Hitbox To Default", function()
-        local defaults = {
-            HitboxSizeX = 5.2, HitboxSizeY = 6, HitboxSizeZ = 5.65,
-            HitboxScale = 2.2, HitboxOffX = 0, HitboxOffY = 0, HitboxOffZ = -3.5,
-            HitboxWindow = 200,
-            HitboxEnabled = false,
-            ShowHitbox = false,
-        }
-        for key, val in pairs(defaults) do
-            State[key] = val
-            if Saved then Saved[key] = val end
-            local R = Registry and Registry[key]
-            if R and R.Element and R.Element.Set then
-                pcall(function() R.Element:Set(val) end)
+    local function FootOffset(k, kr)
+        local low
+        for _, n in ipairs({ "LeftFoot", "RightFoot", "Left Leg", "Right Leg", "LeftLowerLeg", "RightLowerLeg" }) do
+            local p = k:FindFirstChild(n)
+            if p and p:IsA("BasePart") then
+                local b = p.Position.Y - p.Size.Y / 2
+                if not low or b < low then low = b end
             end
         end
-        if type(SaveSettings) == "function" then SaveSettings() end
+        return low and (low - kr.Position.Y) or -3
+    end
+
+    -- ───────────────────────── custom zone ─────────────────────
+    local function BuildZone(k)
+        local m = Instance.new("Model"); m.Name = "Zone_" .. k.Name; m.Parent = VisFolder
+        local kr = k:FindFirstChild("HumanoidRootPart")
+        local edges = {}
+        for i = 1, 4 do
+            local p = Instance.new("Part")
+            p.Name = "Edge" .. i; p.Anchored = true; p.CanCollide = false; p.CanQuery = false; p.CanTouch = false
+            p.CastShadow = false; p.Material = Enum.Material.Neon; p.Color = COL_ZONE; p.Transparency = 0.6
+            p.Size = Vector3.new(0.35, 0.08, 1); p.CFrame = CFrame.new(0, -5000, 0); p.Parent = m
+            edges[i] = p
+        end
+        local c = Instance.new("Part")
+        c.Shape = Enum.PartType.Cylinder; c.Name = "Circle"; c.Anchored = true
+        c.CanCollide = false; c.CanQuery = false; c.CanTouch = false; c.CastShadow = false
+        c.Material = Enum.Material.Neon; c.Color = COL_ZONE; c.Transparency = 0.7
+        c.Size = Vector3.new(CIR_H, 10, 10); c.CFrame = CFrame.new(0, -5000, 0); c.Parent = m
+        return { model = m, edges = edges, circle = c, footY = kr and FootOffset(k, kr) or -3 }
+    end
+
+    local function InDiamond(myPos, kCF, kPos)
+        local ff = Vector3.new(kCF.LookVector.X, 0, kCF.LookVector.Z)
+        local rr = Vector3.new(kCF.RightVector.X, 0, kCF.RightVector.Z)
+        if ff.Magnitude < 0.01 or rr.Magnitude < 0.01 then return false end
+        ff, rr = ff.Unit, rr.Unit
+        local tp = Vector3.new(myPos.X - kPos.X, 0, myPos.Z - kPos.Z)
+        local L, W, O = State.DiamondLength or 8, State.DiamondWidth or 4, State.DiamondOffset or 3
+        local d = tp:Dot(ff) - (O + L / 2)
+        local hw, hl = W / 2 + PLAYER_R, L / 2 + PLAYER_R
+        return math.abs(tp:Dot(rr)) / hw + math.abs(d) / hl <= 1
+    end
+    local function InCircle(myPos, kPos)
+        local dx, dz = myPos.X - kPos.X, myPos.Z - kPos.Z
+        local r = (State.CircleRadius or 5) + PLAYER_R
+        return dx * dx + dz * dz <= r * r
+    end
+    local function InCustom(k)
+        local kr = k and k.Parent and k:FindFirstChild("HumanoidRootPart")
+        if not kr or not LocalRoot then return false end
+        if State.ZoneDiamond and InDiamond(LocalRoot.Position, kr.CFrame, kr.Position) then return true end
+        if State.ZoneCircle and InCircle(LocalRoot.Position, kr.Position) then return true end
+        return false
+    end
+
+    local function UpdateZone(z, k, kr)
+        local bY = kr.Position.Y + (z.footY or -3) + ZONE_OFF
+        local dCF = FlatLook(kr, bY + DIA_H)
+        local cCF = FlatLook(kr, bY + CIR_H)
+        local off, L, W = State.DiamondOffset or 3, State.DiamondLength or 8, State.DiamondWidth or 4
+        local wA = dCF:PointToWorldSpace(Vector3.new(0, 0, -off))
+        local wB = dCF:PointToWorldSpace(Vector3.new(0, 0, -(off + L)))
+        local wC = dCF:PointToWorldSpace(Vector3.new(-W / 2, 0, -(off + L / 2)))
+        local wD = dCF:PointToWorldSpace(Vector3.new(W / 2, 0, -(off + L / 2)))
+        local specs = { { wA, wC }, { wA, wD }, { wB, wC }, { wB, wD } }
+        local inD = LocalRoot and State.ZoneDiamond and InDiamond(LocalRoot.Position, kr.CFrame, kr.Position)
+        local inC = LocalRoot and State.ZoneCircle and InCircle(LocalRoot.Position, kr.Position)
+        for i, sp in ipairs(specs) do
+            local mid, diff = (sp[1] + sp[2]) / 2, sp[2] - sp[1]
+            local e = z.edges[i]
+            if e and diff.Magnitude > 0.01 then
+                e.Size = Vector3.new(0.35, 0.08, diff.Magnitude)
+                e.CFrame = CFrame.lookAt(mid, mid + diff.Unit)
+                e.Transparency = State.ZoneDiamond and 0.6 or 1
+                e.Color = inD and COL_READY or COL_ZONE
+            end
+        end
+        local r = State.CircleRadius or 5
+        z.circle.Size = Vector3.new(CIR_H, r * 2, r * 2)
+        z.circle.CFrame = CFrame.new(cCF.Position) * CFrame.Angles(0, 0, math.rad(90))
+        z.circle.Transparency = State.ZoneCircle and 0.7 or 1
+        z.circle.Color = inC and COL_READY or COL_ZONE
+    end
+
+    -- ───────────────────────── rectangle ───────────────────────
+    local function RectCF(kr)
+        local lv = kr.CFrame.LookVector
+        local f = Vector3.new(lv.X, 0, lv.Z)
+        if f.Magnitude < 0.01 then f = Vector3.new(0, 0, -1) else f = f.Unit end
+        local p = kr.Position + f * (State.RectDistance or 3)
+        return CFrame.lookAt(p, p + f)
+    end
+    local function RectSize()
+        local m = State.RectMult or 1
+        return Vector3.new(4 * m, 4 * m, 6 * m)
+    end
+    local function InRect(pos, cf, size)
+        local lp = cf:PointToObjectSpace(pos)
+        return math.abs(lp.X) <= size.X / 2 + PLAYER_R
+            and math.abs(lp.Z) <= size.Z / 2 + PLAYER_R
+            and math.abs(lp.Y) <= size.Y / 2 + PLAYER_R
+    end
+
+    local EdgePairs = { {1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},{1,5},{2,6},{3,7},{4,8} }
+    local function Corners(size)
+        local W, H, L = size.X, size.Y, size.Z
+        return {
+            Vector3.new(-W/2,-H/2,-L/2), Vector3.new(W/2,-H/2,-L/2), Vector3.new(W/2,-H/2,L/2), Vector3.new(-W/2,-H/2,L/2),
+            Vector3.new(-W/2, H/2,-L/2), Vector3.new(W/2, H/2,-L/2), Vector3.new(W/2, H/2,L/2), Vector3.new(-W/2, H/2,L/2),
+        }
+    end
+    local function EdgeCF(p1, p2)
+        local mid, diff = (p1 + p2) / 2, p2 - p1
+        local dir, up = diff.Unit, Vector3.new(0, 1, 0)
+        if math.abs(dir.Y) > 0.95 then up = Vector3.new(0, 0, 1) end
+        local rgt = dir:Cross(up)
+        if rgt.Magnitude < 0.01 then rgt = Vector3.new(1, 0, 0) end
+        rgt = rgt.Unit
+        return CFrame.fromMatrix(mid, rgt, rgt:Cross(dir).Unit, dir), diff.Magnitude
+    end
+
+    local function BuildBoxEdges(box, cf, size)
+        if not box or not box.model or not box.model.Parent then return end
+        local c = Corners(size)
+        for i, pr in ipairs(EdgePairs) do
+            local e = box.edges[i]
+            if e and e.Parent then
+                local p1, p2 = cf:PointToWorldSpace(c[pr[1]]), cf:PointToWorldSpace(c[pr[2]])
+                local ecf, len = EdgeCF(p1, p2)
+                if len > 0.01 then
+                    e.Size = Vector3.new(RECT_THICK, RECT_THICK, len)
+                    e.CFrame = ecf
+                end
+            end
+        end
+    end
+
+    local function CreateBox(k, kind, color, trans, dur)
+        local kr = k and k.Parent and k:FindFirstChild("HumanoidRootPart")
+        if not kr then return nil end
+        local m = Instance.new("Model"); m.Name = "RectBox_" .. kind; m.Parent = VisFolder
+        local edges = {}
+        for i = 1, 12 do
+            local e = Instance.new("Part")
+            e.Name = "Edge" .. i; e.Anchored = true; e.CanCollide = false; e.CanQuery = false; e.CanTouch = false
+            e.CastShadow = false; e.Material = Enum.Material.Neon; e.Color = color; e.Transparency = trans
+            e.Size = Vector3.new(RECT_THICK, RECT_THICK, 1); e.CFrame = CFrame.new(0, -5000, 0); e.Parent = m
+            edges[i] = e
+        end
+        local box = { type = kind, model = m, edges = edges, killer = k, startTime = os.clock(), duration = dur }
+        BuildBoxEdges(box, RectCF(kr), RectSize())
+        return box
+    end
+    local function CreateMass(k, dur)
+        local kr = k and k.Parent and k:FindFirstChild("HumanoidRootPart")
+        if not kr then return nil end
+        local b = Instance.new("Part")
+        b.Name = "MassBlock"; b.Anchored = true; b.CanCollide = false; b.CanQuery = false; b.CanTouch = false
+        b.CastShadow = false; b.Material = Enum.Material.Neon; b.Color = COL_MASS
+        b.Transparency = 0.65; b.Size = RectSize(); b.CFrame = RectCF(kr); b.Parent = VisFolder
+        return { type = "mass", block = b, killer = k, startTime = os.clock(), duration = dur }
+    end
+    local function DestroyBox(b)
+        if not b then return end
+        if b.model and b.model.Parent then pcall(function() b.model:Destroy() end) end
+        if b.block and b.block.Parent then pcall(function() b.block:Destroy() end) end
+    end
+    local function ClearType(t)
+        for i = #Boxes, 1, -1 do
+            if Boxes[i].type == t then DestroyBox(Boxes[i]); table.remove(Boxes, i) end
+        end
+    end
+    local function ClearBoxes()
+        for i = #Boxes, 1, -1 do DestroyBox(Boxes[i]); Boxes[i] = nil end
+    end
+
+    local function SpawnMass(k)
+        local dur = State.RectDuration or 0.25
+        for _, b in ipairs(Boxes) do
+            if b.type == "mass" and b.killer == k and b.block and b.block.Parent then
+                b.startTime = os.clock(); b.duration = dur
+                return
+            end
+        end
+        local box = CreateMass(k, dur)
+        if box then table.insert(Boxes, box) end
+    end
+
+    local function Hit(k, kr)
+        ClearType("mass"); ClearType("real")
+        local real = CreateBox(k, "real", COL_EDGE, State.RectEdgeTrans or 0.2, RECT_HIT_DUR)
+        if real then table.insert(Boxes, real) end
+        ZoneFire(kr)
+    end
+
+    -- Called by the Auto Block when the killer starts an attack.
+    -- Inside rectangle -> block now. Outside -> arm a "mass block" for
+    -- RectDuration seconds; stepping into it during that window blocks.
+    local function TriggerRect(k)
+        if not k or not k.Parent or not LocalRoot then return end
+        local kr = k:FindFirstChild("HumanoidRootPart"); if not kr then return end
+        if InRect(LocalRoot.Position, RectCF(kr), RectSize()) then
+            Hit(k, kr)
+        else
+            SpawnMass(k)
+        end
+    end
+
+    -- ───────────────────────── render loop ─────────────────────
+    RunService.RenderStepped:Connect(function()
+        local rectOn   = ModeIs("Rectangle")
+        local customOn = ModeIs("Custom Zone")
+        local kf = KillersFolder
+
+        -- rectangle boxes
+        if not rectOn then
+            if #Boxes > 0 then ClearBoxes() end
+            for k, sb in pairs(ShowBoxes) do DestroyBox(sb); ShowBoxes[k] = nil end
+        else
+            local now = os.clock()
+            local mr = LocalRoot
+            for i = #Boxes, 1, -1 do
+                local b = Boxes[i]
+                if not b or not b.killer or not b.killer.Parent then
+                    if b then DestroyBox(b) end
+                    table.remove(Boxes, i)
+                elseif now - b.startTime > b.duration then
+                    DestroyBox(b); table.remove(Boxes, i)
+                else
+                    local kr = b.killer:FindFirstChild("HumanoidRootPart")
+                    if kr then
+                        if b.type == "mass" then
+                            local size, cf = RectSize(), RectCF(kr)
+                            b.block.Size = size; b.block.CFrame = cf
+                            local rem = math.clamp(1 - (now - b.startTime) / b.duration, 0, 1)
+                            b.block.Transparency = 0.65 + 0.35 * (1 - rem)
+                            if mr and InRect(mr.Position, cf, size) then
+                                local killer = b.killer
+                                Hit(killer, kr)
+                                break
+                            end
+                        else
+                            BuildBoxEdges(b, RectCF(kr), RectSize())
+                        end
+                    end
+                end
+            end
+
+            if State.RectShow and kf then
+                local seen = {}
+                for _, k in ipairs(kf:GetChildren()) do
+                    local kr = k:IsA("Model") and k:FindFirstChild("HumanoidRootPart")
+                    if kr then
+                        seen[k] = true
+                        local sb = ShowBoxes[k]
+                        if not sb or not sb.model or not sb.model.Parent then
+                            if sb then DestroyBox(sb) end
+                            sb = CreateBox(k, "show", COL_EDGE, RECT_SHOW_TRANS, math.huge)
+                            ShowBoxes[k] = sb
+                        elseif sb then
+                            BuildBoxEdges(sb, RectCF(kr), RectSize())
+                        end
+                    end
+                end
+                for k, sb in pairs(ShowBoxes) do
+                    if not seen[k] then DestroyBox(sb); ShowBoxes[k] = nil end
+                end
+            else
+                for k, sb in pairs(ShowBoxes) do DestroyBox(sb); ShowBoxes[k] = nil end
+            end
+        end
+
+        -- custom zone visuals
+        if not (customOn and State.ZoneShow and kf) then
+            for k, z in pairs(Zones) do
+                if z.model then pcall(function() z.model:Destroy() end) end
+                Zones[k] = nil
+            end
+        else
+            for _, k in ipairs(kf:GetChildren()) do
+                local kr = k:IsA("Model") and k:FindFirstChild("HumanoidRootPart")
+                if kr then
+                    local z = Zones[k]
+                    if not z or not z.model or not z.model.Parent then
+                        z = BuildZone(k); Zones[k] = z
+                    end
+                    UpdateZone(z, k, kr)
+                end
+            end
+            for k, z in pairs(Zones) do
+                if not k.Parent then
+                    if z.model then pcall(function() z.model:Destroy() end) end
+                    Zones[k] = nil
+                end
+            end
+        end
     end)
+
+    -- ───────────────────────── preview window ──────────────────
+    local function UpdatePreview()
+        if not Preview.vp then return end
+        for _, e in ipairs(Preview.edges) do if e.Parent then e:Destroy() end end
+        Preview.edges = {}
+        local dist, m = State.RectDistance or 3, State.RectMult or 1
+        local size = Vector3.new(4 * m, 4 * m, 6 * m)
+        local ccf = CFrame.new(0, 3, -dist)
+        local c = Corners(size)
+        for _, pr in ipairs(EdgePairs) do
+            local ecf, len = EdgeCF(ccf:PointToWorldSpace(c[pr[1]]), ccf:PointToWorldSpace(c[pr[2]]))
+            if len > 0.01 then
+                local p = Instance.new("Part")
+                p.Size = Vector3.new(0.15, 0.15, len); p.CFrame = ecf
+                p.Anchored = true; p.CanCollide = false; p.CanQuery = false
+                p.Material = Enum.Material.Neon; p.Color = COL_EDGE
+                p.Transparency = State.RectEdgeTrans or 0.2
+                p.Parent = Preview.vp
+                table.insert(Preview.edges, p)
+            end
+        end
+        local radius = math.max(size.Z, size.Y) * 1.15
+        Preview.cam.CFrame = CFrame.lookAt(Vector3.new(radius, 3, -dist / 2), Vector3.new(0, 3, -dist / 2))
+        Preview.labels.W.Text = string.format("W: %.2f", size.X)
+        Preview.labels.H.Text = string.format("H: %.2f", size.Y)
+        Preview.labels.L.Text = string.format("L: %.2f", size.Z)
+        Preview.labels.D.Text = string.format("Dist: %.2f", dist)
+    end
+
+    local function BuildPreview()
+        if Preview.gui then return end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "FlexRectPreview"; sg.ResetOnSpawn = false; sg.IgnoreGuiInset = true; sg.DisplayOrder = 999999
+        local ok = pcall(function() sg.Parent = gethui() end)
+        if not ok or not sg.Parent then sg.Parent = CoreGui end
+        Preview.gui = sg
+
+        local main = Instance.new("Frame")
+        main.Size = UDim2.fromOffset(420, 380); main.Position = UDim2.new(0.5, -210, 0.5, -190)
+        main.BackgroundColor3 = Color3.fromRGB(18, 6, 8); main.BorderSizePixel = 0
+        main.Active = true; main.Draggable = true; main.Parent = sg
+        Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
+
+        local bar = Instance.new("Frame")
+        bar.Size = UDim2.new(1, 0, 0, 30); bar.BackgroundColor3 = Color3.fromRGB(140, 10, 30); bar.BorderSizePixel = 0; bar.Parent = main
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 8)
+        local title = Instance.new("TextLabel")
+        title.Size = UDim2.new(1, -40, 1, 0); title.Position = UDim2.new(0, 10, 0, 0); title.BackgroundTransparency = 1
+        title.Text = "Rectangle Hitbox Preview"; title.TextColor3 = Color3.fromRGB(255, 220, 225)
+        title.Font = Enum.Font.GothamBold; title.TextSize = 13; title.TextXAlignment = Enum.TextXAlignment.Left; title.Parent = bar
+        local close = Instance.new("TextButton")
+        close.Size = UDim2.fromOffset(24, 24); close.Position = UDim2.new(1, -28, 0, 3)
+        close.BackgroundColor3 = Color3.fromRGB(60, 8, 16); close.Text = "X"; close.TextColor3 = Color3.new(1, 1, 1)
+        close.Font = Enum.Font.GothamBold; close.TextSize = 12; close.BorderSizePixel = 0; close.Parent = bar
+        Instance.new("UICorner", close).CornerRadius = UDim.new(0, 6)
+        close.MouseButton1Click:Connect(function() sg.Enabled = false; Preview.open = false end)
+
+        local vp = Instance.new("ViewportFrame")
+        vp.Size = UDim2.new(1, -20, 1, -80); vp.Position = UDim2.new(0, 10, 0, 40)
+        vp.BackgroundColor3 = Color3.fromRGB(12, 4, 6); vp.BorderSizePixel = 0; vp.Parent = main
+        Instance.new("UICorner", vp).CornerRadius = UDim.new(0, 6)
+        local cam = Instance.new("Camera"); cam.FieldOfView = 55; cam.Parent = vp; vp.CurrentCamera = cam
+        Preview.vp, Preview.cam = vp, cam
+
+        local lb = Instance.new("Frame")
+        lb.Size = UDim2.new(1, -20, 0, 30); lb.Position = UDim2.new(0, 10, 1, -35)
+        lb.BackgroundColor3 = Color3.fromRGB(30, 8, 12); lb.BorderSizePixel = 0; lb.Parent = main
+        Instance.new("UICorner", lb).CornerRadius = UDim.new(0, 6)
+        local function mk(txt, x, w)
+            local l = Instance.new("TextLabel")
+            l.Size = UDim2.new(w, 0, 1, 0); l.Position = UDim2.new(x, 0, 0, 0); l.BackgroundTransparency = 1
+            l.Text = txt; l.TextColor3 = Color3.fromRGB(255, 180, 190); l.Font = Enum.Font.GothamSemibold
+            l.TextSize = 12; l.Parent = lb
+            return l
+        end
+        Preview.labels.W = mk("W", 0, 0.2); Preview.labels.H = mk("H", 0.2, 0.2)
+        Preview.labels.L = mk("L", 0.4, 0.2); Preview.labels.D = mk("Dist", 0.6, 0.4)
+    end
+
+    local function TogglePreview()
+        BuildPreview()
+        Preview.open = not Preview.open
+        Preview.gui.Enabled = Preview.open
+        if Preview.open then UpdatePreview() end
+    end
+    local function RefreshPreview() if Preview.open then pcall(UpdatePreview) end end
+
+    -- ───────────────────────── hook into Auto Block ────────────
+    ZoneHook = function(killer)
+        if not killer or IsLocalKiller() then return false end
+        local mode = State.ZoneMode
+        if mode == "Rectangle" then
+            TriggerRect(killer)
+            return true
+        elseif mode == "Custom Zone" then
+            local kr = killer:FindFirstChild("HumanoidRootPart")
+            if kr and InCustom(killer) then ZoneFire(kr) end
+            return true
+        end
+        return false -- "Default" -> original QueryHitbox check
+    end
+    getgenv()._flexZoneHook = ZoneHook
+
+    -- ───────────────────────── UI ──────────────────────────────
+    AddSection(TabZone, "Hit Check Mode (needs Auto Block ON)")
+    AddDropdown(TabZone, "ZoneMode", "Hit Check Mode", { "Default", "Custom Zone", "Rectangle" }, "Default")
+    AddDropdown(TabZone, "ZoneAbility", "Block Ability", { "Block", "007n7 Clone" }, "Block")
+
+    AddSection(TabZone, "Rectangle")
+    AddSlider(TabZone, "RectDistance", "Hitbox Distance", 0, 10, 3, 0.1, RefreshPreview)
+    AddSlider(TabZone, "RectMult", "Hitbox Multiplier", 0.5, 3, 1, 0.05, RefreshPreview)
+    AddSlider(TabZone, "RectEdgeTrans", "Edge Transparency", 0, 1, 0.2, 0.05, RefreshPreview)
+    AddSlider(TabZone, "RectDuration", "Mass Block Duration (s)", 0.05, 2, 0.25, 0.05)
+    AddToggle(TabZone, "RectShow", "Show Hitbox Rectangle", false)
+    AddButton(TabZone, "Preview Hitbox", function() pcall(TogglePreview) end)
+
+    AddSection(TabZone, "Custom Zone")
+    AddToggle(TabZone, "ZoneDiamond", "Use Diamond Zone", true)
+    AddToggle(TabZone, "ZoneCircle", "Use Circle Zone", false)
+    AddToggle(TabZone, "ZoneShow", "Show Zones", false)
+    AddSlider(TabZone, "DiamondLength", "Diamond Length", 1, 20, 8, 0.5)
+    AddSlider(TabZone, "DiamondWidth", "Diamond Width", 1, 20, 4, 0.5)
+    AddSlider(TabZone, "DiamondOffset", "Diamond Face Offset", 0, 10, 3, 0.5)
+    AddSlider(TabZone, "CircleRadius", "Circle Radius", 1, 20, 5, 0.5)
 end
