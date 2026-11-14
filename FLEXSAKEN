@@ -581,7 +581,7 @@ VisualCheckBeam.CanTouch     = false
 VisualCheckBeam.Transparency = 1
 VisualCheckBeam.Parent       = workspace
 local beamAtt0 = Instance.new("Attachment"); local beamAtt1 = Instance.new("Attachment")
-beamAtt0.Parent = LocalRoot or workspace; beamAtt1.Parent = VisualCheckBeam
+beamAtt0.Parent = LocalRoot or VisualCheckBeam; beamAtt1.Parent = VisualCheckBeam
 local VisualBeam = Instance.new("Beam")
 VisualBeam.Attachment0  = beamAtt0; VisualBeam.Attachment1 = beamAtt1
 VisualBeam.Width0       = 0.05; VisualBeam.Width1 = 0.05
@@ -1464,7 +1464,7 @@ pcall(function()
         local attach = topPart(model)
         if not attach then
             for _, d in ipairs(model:GetDescendants()) do
-                if d:IsA("BasePart") and d.Name ~= "Handle" then attach = d break end
+                if d:IsA("BasePart") and d.Name ~= "Handle" then attach = d; break end
             end
         end
         if not attach then return end
@@ -1613,7 +1613,7 @@ pcall(function()
             root = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Torso") or obj.PrimaryPart
             if not root then
                 for _, c in ipairs(obj:GetChildren()) do
-                    if c:IsA("BasePart") then root = c break end
+                    if c:IsA("BasePart") then root = c; break end
                 end
             end
         end
@@ -2914,7 +2914,7 @@ local function installMinigameHooks()
             for color, path in pairs(paths) do
                 if not stillSolving(token, object) then return end
                 local ok, drawing = pcall(function() return board:Begin(path[1]) end)
-                if not ok or not drawing then continue end
+                if ok and drawing then
                 pcall(function() renderer:Render() end); task.wait(solverDelay())
                 for index = 2, #path do
                     if not stillSolving(token, object) then return end
@@ -2923,6 +2923,7 @@ local function installMinigameHooks()
                 end
                 pcall(function() board:Release(drawing, true) end)
                 pcall(function() renderer:Render() end); task.wait(solverDelay())
+                end -- close if ok and drawing
             end
             if stillSolving(token, object) then
                 local solved = pcall(function() return board:IsSolved() end) and board:IsSolved()
@@ -3389,11 +3390,12 @@ local function BS_runPlaceSequence()
     if BS.moredirectenabled then BS.moredirectrn = true; task.wait(0.01); BS.moredirectrn = false end
 
     local t0 = os.clock()
+    local _preRenderSignal = pcall(function() return RunService.PreRender end) and RunService.PreRender or RunService.RenderStepped
     while os.clock() - t0 < BS.duration do
         if not character.Parent or not place.Parent or not BS.isEnabled then break end
         if BS.speed then BS.speed.Value = 0 end
         BS.doitmate = true
-        RunService.PreRender:Wait()
+        _preRenderSignal:Wait()
     end
 
     if place and place.Parent then place:Destroy() end
@@ -3427,12 +3429,13 @@ local function BS_runDashstabSequence()
 
     if BS.moredirectenabled then BS.moredirectrn = true; task.wait(0.01); BS.moredirectrn = false end
 
+    local _preRenderSignal2 = pcall(function() return RunService.PreRender end) and RunService.PreRender or RunService.RenderStepped
     local t0 = os.clock()
     while os.clock() - t0 < BS.duration do
         if not character.Parent or not place.Parent or not BS.isDashstabEnabled then break end
         if BS.speed then BS.speed.Value = 0 end
         BS.doitmate = true
-        RunService.PreRender:Wait()
+        _preRenderSignal2:Wait()
     end
 
     if BS.speed then BS.speed.Value = oldspeed end
@@ -3748,7 +3751,7 @@ local function G1337_getNearestKiller()
         local killer = G1337_killersFolder:FindFirstChild(name)
         if killer and killer:FindFirstChild("HumanoidRootPart") and killer:FindFirstChild("Humanoid") and killer.Humanoid.Health > 0 then
             local dist = (killer.HumanoidRootPart.Position - myRoot.Position).Magnitude
-            if dist < shortest then shortest = dist closest = killer end
+            if dist < shortest then shortest = dist; closest = killer end
         end
     end
     return closest
@@ -3762,7 +3765,7 @@ local function G1337_startAiming(target)
             G1337_CurrentTarget = nil return
         end
         local tRoot = G1337_CurrentTarget.HumanoidRootPart
-        local pred = tRoot.Position + tRoot.Velocity * getgenv().PunchAimbot.Prediction
+        local pred = tRoot.Position + tRoot.AssemblyLinearVelocity * getgenv().PunchAimbot.Prediction
         if getgenv().PunchAimbot.Mode == "Camera" then
             workspace.CurrentCamera.CFrame = workspace.CurrentCamera.CFrame:Lerp(CFrame.new(workspace.CurrentCamera.CFrame.Position, pred), getgenv().PunchAimbot.Smoothness)
         else
@@ -3801,8 +3804,7 @@ local function G1337_updateESP()
         local root = killer and killer:FindFirstChild("HumanoidRootPart")
         if not root then
             G1337_inSphere[killerName], G1337_inBox[killerName], G1337_hasLos[killerName] = false, false, false
-            continue
-        end
+        else
         local distance = (myPos - root.Position).Magnitude
         local los = G1337_hasLineOfSight(root)
         G1337_hasLos[killerName] = los
@@ -3840,6 +3842,7 @@ local function G1337_updateESP()
             G1337_inBox[killerName] = inside
             box.Color = (inside and (not G1337_settings.wallCheck or los)) and Color3.new(0,1,0) or Color3.new(1,0,0)
         end
+        end -- close else (root exists)
     end
 end
 
@@ -3894,44 +3897,48 @@ RunService.Heartbeat:Connect(function()
     local myPos = LocalPlayer.Character.HumanoidRootPart.Position
     for _, killerName in ipairs(G1337_killersList) do
         local killer = G1337_killersFolder:FindFirstChild(killerName)
-        if not killer then continue end
-        local root = killer:FindFirstChild("HumanoidRootPart")
-        local head = killer:FindFirstChild("Head")
-        if not root or not head then continue end
-        local dist = (myPos - root.Position).Magnitude
-        if dist > G1337_settings.sphereRange + 20 then continue end
-        if G1337_settings.onlyLooking and head.CFrame.LookVector:Dot((myPos - head.Position).Unit) < 0.5 then continue end
-        local los = G1337_hasLos[killerName] or G1337_hasLineOfSight(root)
-        local inRange = G1337_inSphere[killerName] or dist <= G1337_settings.sphereRange
-        local inCustomBox = G1337_inBox[killerName] or false
-        local inDangerZone = (G1337_settings.sphereEsp and inRange and (not G1337_settings.wallCheck or los)) or
-                             (G1337_settings.customEsp and inCustomBox and (not G1337_settings.wallCheck or los)) or
-                             (not G1337_settings.sphereEsp and not G1337_settings.customEsp and inRange and (not G1337_settings.wallCheck or los))
-        if not inDangerZone then continue end
-        local now = os.clock()
-        for _, sound in pairs(killer:GetDescendants()) do
-            if sound:IsA("Sound") and sound.Playing then
-                local id = sound.SoundId:match("%d+") or ""
-                if killerName == "1x1x1x1" and id == G1337_special1x1Sound then
-                    if not G1337_lastSoundTime[id] or now - G1337_lastSoundTime[id] > 1 then
-                        G1337_lastSoundTime[id] = now
-                        G1337_show1x1Advice(root)
-                        task.spawn(function()
-                            task.wait(0.65 + math.random()/10)
-                            if G1337_settings.autoblock and G1337_canUseBlock() then G1337_remote:FireServer("UseActorAbility", {"Block"}) end
-                            if G1337_settings.hd and G1337_canUseBlock() then G1337_doHDPull(root.Position) end
-                        end)
+        if killer then
+            local root = killer:FindFirstChild("HumanoidRootPart")
+            local head = killer:FindFirstChild("Head")
+            if root and head then
+                local dist = (myPos - root.Position).Magnitude
+                local facingOk = not G1337_settings.onlyLooking or head.CFrame.LookVector:Dot((myPos - head.Position).Unit) >= 0.5
+                if dist <= G1337_settings.sphereRange + 20 and facingOk then
+                    local los = G1337_hasLos[killerName] or G1337_hasLineOfSight(root)
+                    local inRange = G1337_inSphere[killerName] or dist <= G1337_settings.sphereRange
+                    local inCustomBox = G1337_inBox[killerName] or false
+                    local inDangerZone = (G1337_settings.sphereEsp and inRange and (not G1337_settings.wallCheck or los)) or
+                                         (G1337_settings.customEsp and inCustomBox and (not G1337_settings.wallCheck or los)) or
+                                         (not G1337_settings.sphereEsp and not G1337_settings.customEsp and inRange and (not G1337_settings.wallCheck or los))
+                    if inDangerZone then
+                        local now = os.clock()
+                        for _, sound in pairs(killer:GetDescendants()) do
+                            if sound:IsA("Sound") and sound.Playing then
+                                local id = sound.SoundId:match("%d+") or ""
+                                if killerName == "1x1x1x1" and id == G1337_special1x1Sound then
+                                    if not G1337_lastSoundTime[id] or now - G1337_lastSoundTime[id] > 1 then
+                                        G1337_lastSoundTime[id] = now
+                                        G1337_show1x1Advice(root)
+                                        task.spawn(function()
+                                            task.wait(0.65 + math.random()/10)
+                                            if G1337_settings.autoblock and G1337_canUseBlock() then G1337_remote:FireServer("UseActorAbility", {"Block"}) end
+                                            if G1337_settings.hd and G1337_canUseBlock() then G1337_doHDPull(root.Position) end
+                                        end)
+                                    end
+                                    break
+                                end
+                                if G1337_attackSoundIds[id] and (not G1337_lastSoundTime[id] or now - G1337_lastSoundTime[id] > 0.2) then
+                                    G1337_lastSoundTime[id] = now
+                                    task.spawn(function()
+                                        task.wait(0.008 + math.random()/100)
+                                        if G1337_settings.autoblock and G1337_canUseBlock() then G1337_remote:FireServer("UseActorAbility", {"Block"}) end
+                                        if G1337_settings.hd and G1337_canUseBlock() then G1337_doHDPull(root.Position) end
+                                    end)
+                                    break
+                                end
+                            end
+                        end
                     end
-                    break
-                end
-                if G1337_attackSoundIds[id] and (not G1337_lastSoundTime[id] or now - G1337_lastSoundTime[id] > 0.2) then
-                    G1337_lastSoundTime[id] = now
-                    task.spawn(function()
-                        task.wait(0.008 + math.random()/100)
-                        if G1337_settings.autoblock and G1337_canUseBlock() then G1337_remote:FireServer("UseActorAbility", {"Block"}) end
-                        if G1337_settings.hd and G1337_canUseBlock() then G1337_doHDPull(root.Position) end
-                    end)
-                    break
                 end
             end
         end
@@ -4206,8 +4213,23 @@ local TabKiller    = Window:Tab({ Title = "Killer",     Icon = "skull" })
 local TabExtra     = Window:Tab({ Title = "Extra",      Icon = "zap" })
 local TabJaneDoe   = Window:Tab({ Title = "Jane Doe",   Icon = "music" })
 
+-- ─── Auto Block (Original FluxSaken — QueryHitbox / Sound / Anim based) ─────
+AddSection(TabAutoBlock, "Original Auto Block")
+AddToggle(TabAutoBlock, "AutoBlock", "Auto Block", false, function(v)
+    SetAutoBlock(v)
+    if v then StartFourthButton() else StopFourthButton() end
+end)
+AddToggle(TabAutoBlock, "StrictVisualCheck", "Strict Visual Check (Beam)", false)
+AddToggle(TabAutoBlock, "HitboxDrag",        "Hitbox Drag",                false)
+AddSlider(TabAutoBlock, "HitboxDragRange",   "Drag Range (studs)",   5,  60,  30,  1)
+AddSlider(TabAutoBlock, "DragSpeed",         "Drag Speed",           1,  40,  14,  1)
+AddSlider(TabAutoBlock, "BlockDelay",        "Block Delay (ms)",     0,  200, 0,   1)
+AddSection(TabAutoBlock, "Punch (Original)")
+AddToggle(TabAutoBlock, "PunchAimbot", "Punch Aimbot (Two-Time)", false)
+AddToggle(TabAutoBlock, "AutoPunch",   "Auto Punch Counter",       false)
+
 -- ─── Auto Block (Guest 1337 Features) ───────────────────────
-AddSection(TabAutoBlock, "Auto Block")
+AddSection(TabAutoBlock, "Auto Block Alt (G1337)")
 AddToggle(TabAutoBlock, "G1337_AutoBlock", "Autoblock", false, function(v) G1337_settings.autoblock = v end)
 AddToggle(TabAutoBlock, "G1337_OnlyLooking", "Only When Looking", true, function(v) G1337_settings.onlyLooking = v end)
 AddToggle(TabAutoBlock, "G1337_WallCheck", "Wall Check", true, function(v) G1337_settings.wallCheck = v end)
