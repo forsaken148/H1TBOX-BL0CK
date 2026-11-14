@@ -1797,39 +1797,55 @@ pcall(function()
 
     local mainSection
     pcall(function() mainSection = tabESP:Section({ Title = "Main Settings", Opened = true }) end)
-    pcall(function() mainSection:Toggle({ Title = "Enable ESP", Type = "Checkbox", Flag = "espEnabled", Default = esp.enabled, Callback = function(on) esp.enabled = on if on then startESP() else stopESP() end end }) end)
+    pcall(function() if mainSection then mainSection:Toggle({ Title = "Enable ESP", Type = "Checkbox", Flag = "espEnabled", Default = esp.enabled, Callback = function(on) esp.enabled = on if on then startESP() else stopESP() end end }) end end)
 
     local catSection
     pcall(function() catSection = tabESP:Section({ Title = "Categories", Opened = true }) end)
-    pcall(function() catSection:Toggle({ Title = "Killers", Type = "Checkbox", Flag = "espKillers", Default = esp.showKillers, Callback = function(on) esp.showKillers = on if esp.enabled then startESP() end end }) end)
-    pcall(function() catSection:Toggle({ Title = "Survivors", Type = "Checkbox", Flag = "espSurvivors", Default = esp.showSurvivors, Callback = function(on) esp.showSurvivors = on if esp.enabled then startESP() end end }) end)
-    pcall(function() catSection:Toggle({ Title = "Generators", Type = "Checkbox", Flag = "espGenerators", Default = esp.showGenerators, Callback = function(on) esp.showGenerators = on if esp.enabled then startESP() end end }) end)
-    pcall(function() catSection:Toggle({ Title = "Items", Type = "Checkbox", Flag = "espItems", Default = esp.showItems, Callback = function(on) esp.showItems = on if esp.enabled then startESP() end end }) end)
-    pcall(function() catSection:Toggle({ Title = "Structures", Type = "Checkbox", Flag = "espStructures", Default = esp.showStructures, Callback = function(on) esp.showStructures = on if esp.enabled then startESP() end end }) end)
-    pcall(function() catSection:Toggle({ Title = "Groundbulb & Vine", Type = "Checkbox", Flag = "gvEspOn", Default = plant.enabled, Callback = function(on) if on then startPlants() else stopPlants() end end }) end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Killers", Type = "Checkbox", Flag = "espKillers", Default = esp.showKillers, Callback = function(on) esp.showKillers = on if esp.enabled then startESP() end end }) end end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Survivors", Type = "Checkbox", Flag = "espSurvivors", Default = esp.showSurvivors, Callback = function(on) esp.showSurvivors = on if esp.enabled then startESP() end end }) end end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Generators", Type = "Checkbox", Flag = "espGenerators", Default = esp.showGenerators, Callback = function(on) esp.showGenerators = on if esp.enabled then startESP() end end }) end end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Items", Type = "Checkbox", Flag = "espItems", Default = esp.showItems, Callback = function(on) esp.showItems = on if esp.enabled then startESP() end end }) end end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Structures", Type = "Checkbox", Flag = "espStructures", Default = esp.showStructures, Callback = function(on) esp.showStructures = on if esp.enabled then startESP() end end }) end end)
+    pcall(function() if catSection then catSection:Toggle({ Title = "Groundbulb & Vine", Type = "Checkbox", Flag = "gvEspOn", Default = plant.enabled, Callback = function(on) if on then startPlants() else stopPlants() end end }) end end)
 
     local secPlants
     pcall(function() secPlants = tabESP:Section({ Title = "Groundbulb & Vine Settings", Opened = false }) end)
-    pcall(function() secPlants:Toggle({ Title = "Show Groundbulb", Type = "Checkbox", Flag = "gvShowGroundbulb", Default = plantOpts.groundbulb, Callback = function(on) plantOpts.groundbulb = on end }) end)
-    pcall(function() secPlants:Toggle({ Title = "Show Vine", Type = "Checkbox", Flag = "gvShowVine", Default = plantOpts.vine, Callback = function(on) plantOpts.vine = on end }) end)
-    pcall(function() secPlants:Slider({ Title = "Highlight Transparency", Flag = "gvTransparency", Step = 0.05, Value = { Min = 0.1, Max = 1.0, Default = plantOpts.fillAlpha }, Callback = function(v) plantOpts.fillAlpha = v for _, data in pairs(plant.objects) do if data.highlight and data.highlight.Parent then data.highlight.FillTransparency = v end end end }) end)
-    pcall(function() secPlants:Button({ Title = "Refresh ESP", Callback = function() if plant.enabled then stopPlants() task.wait(0.1) startPlants() end end }) end)
-    pcall(function() secPlants:Button({ Title = "Clear All Highlights", Callback = function() stopPlants() plant.tracked = {} plant.objects = {} end }) end)
+    pcall(function() if secPlants then secPlants:Toggle({ Title = "Show Groundbulb", Type = "Checkbox", Flag = "gvShowGroundbulb", Default = plantOpts.groundbulb, Callback = function(on) plantOpts.groundbulb = on end }) end end)
+    pcall(function() if secPlants then secPlants:Toggle({ Title = "Show Vine", Type = "Checkbox", Flag = "gvShowVine", Default = plantOpts.vine, Callback = function(on) plantOpts.vine = on end }) end end)
+    pcall(function() if secPlants then secPlants:Slider({ Title = "Highlight Transparency", Flag = "gvTransparency", Step = 0.05, Value = { Min = 0.1, Max = 1.0, Default = plantOpts.fillAlpha }, Callback = function(v) plantOpts.fillAlpha = v for _, data in pairs(plant.objects) do if data.highlight and data.highlight.Parent then data.highlight.FillTransparency = v end end end }) end end)
+    pcall(function() if secPlants then secPlants:Button({ Title = "Refresh ESP", Callback = function() if plant.enabled then stopPlants() task.wait(0.1) startPlants() end end }) end end)
+    pcall(function() if secPlants then secPlants:Button({ Title = "Clear All Highlights", Callback = function() stopPlants() plant.tracked = {} plant.objects = {} end }) end end)
 
     local visSection
     pcall(function() visSection = tabESP:Section({ Title = "Visual Settings", Opened = true }) end)
-    pcall(function() visSection:Slider({ Title = "Max Distance", Flag = "espMaxDistance", Step = 10, Value = { Min = 50, Max = 1000, Default = esp.maxDistance }, Callback = function(v) esp.maxDistance = v if esp.enabled then startESP() end end }) end)
-    pcall(function() visSection:Slider({ Title = "Highlight Opacity", Flag = "espTransparency", Step = 0.05, Value = { Min = 0.1, Max = 1.0, Default = esp.transparency }, Callback = function(v) esp.transparency = v if esp.enabled then startESP() end end }) end)
-    pcall(function() visSection:Button({ Title = "Refresh ESP", Callback = function() if esp.enabled then startESP() end end }) end)
-    pcall(function() visSection:Button({ Title = "Refresh Generator Labels", Callback = function() end)
+    pcall(function() if visSection then visSection:Slider({ Title = "Max Distance", Flag = "espMaxDistance", Step = 10, Value = { Min = 50, Max = 1000, Default = esp.maxDistance }, Callback = function(v) esp.maxDistance = v if esp.enabled then startESP() end end }) end end)
+    pcall(function() if visSection then visSection:Slider({ Title = "Highlight Opacity", Flag = "espTransparency", Step = 0.05, Value = { Min = 0.1, Max = 1.0, Default = esp.transparency }, Callback = function(v) esp.transparency = v if esp.enabled then startESP() end end }) end end)
+    pcall(function() if visSection then visSection:Button({ Title = "Refresh ESP", Callback = function() if esp.enabled then startESP() end end }) end end)
+    pcall(function() if visSection then visSection:Button({ Title = "Refresh Generator Labels", Callback = function()
+        for obj in pairs(genLabels) do
+            if obj and obj.Parent then watchGen(obj) else cleanGen(obj) end
+        end
+        local ig = ingameFolder()
+        if ig then
+            for _, o in ipairs(ig:GetChildren()) do
+                if o.Name == "Generator" and o.Parent and readProg(o) < 100 then
+                    if not genLabels[o] then
+                        if esp.enabled and not esp.highlights[o] then addTarget(o, espColors.generator, "Generator") end
+                    else
+                        watchGen(o)
+                    end
+                end
+            end
+        end
+    end }) end end)
 
     local secMobs
     pcall(function() secMobs = tabESP:Section({ Title = "Minion & Ability ESP", Opened = true }) end)
-    pcall(function() secMobs:Toggle({ Title = "c00lkidd Pizza Bots", Type = "Checkbox", Flag = "espPizza", Default = mobOpts.pizza, Callback = function(on) mobOpts.pizza = on if on then findPizza() else clearMob("pizza") end end }) end)
-    pcall(function() secMobs:Toggle({ Title = "1x1x1x1 Zombies", Type = "Checkbox", Flag = "espZombie", Default = mobOpts.zombie, Callback = function(on) mobOpts.zombie = on if on then findZombies() else clearMob("zombie") end end }) end)
-    pcall(function() secMobs:Toggle({ Title = "JD Digital Footprints", Type = "Checkbox", Flag = "espPuddle", Default = mobOpts.puddle, Callback = function(on) mobOpts.puddle = on if on then findPuddles() else clearMob("puddle") end end }) end)
-    pcall(function() secMobs:Slider({ Title = "Highlight Transparency", Flag = "espMinionTrans", Step = 0.05, Value = { Min = 0, Max = 1, Default = mobOpts.alpha }, Callback = function(v) mobOpts.alpha = v syncMobAlpha() end }) end)
-    pcall(function() secMobs:Button({ Title = "Force Rescan", Callback = function() clearMob("pizza") clearMob("zombie") clearMob("puddle") task.wait(0.1) findPizza() findZombies() findPuddles() end }) end)
+    pcall(function() if secMobs then secMobs:Toggle({ Title = "c00lkidd Pizza Bots", Type = "Checkbox", Flag = "espPizza", Default = mobOpts.pizza, Callback = function(on) mobOpts.pizza = on if on then findPizza() else clearMob("pizza") end end }) end end)
+    pcall(function() if secMobs then secMobs:Toggle({ Title = "1x1x1x1 Zombies", Type = "Checkbox", Flag = "espZombie", Default = mobOpts.zombie, Callback = function(on) mobOpts.zombie = on if on then findZombies() else clearMob("zombie") end end }) end end)
+    pcall(function() if secMobs then secMobs:Toggle({ Title = "JD Digital Footprints", Type = "Checkbox", Flag = "espPuddle", Default = mobOpts.puddle, Callback = function(on) mobOpts.puddle = on if on then findPuddles() else clearMob("puddle") end end }) end end)
+    pcall(function() if secMobs then secMobs:Slider({ Title = "Highlight Transparency", Flag = "espMinionTrans", Step = 0.05, Value = { Min = 0, Max = 1, Default = mobOpts.alpha }, Callback = function(v) mobOpts.alpha = v syncMobAlpha() end }) end end)
+    pcall(function() if secMobs then secMobs:Button({ Title = "Force Rescan", Callback = function() clearMob("pizza") clearMob("zombie") clearMob("puddle") task.wait(0.1) findPizza() findZombies() findPuddles() end }) end end)
 
     getgenv()._flexsakenESP = {
         applyConfig = function()
@@ -1950,11 +1966,11 @@ pcall(function()
 
         local secGear
         pcall(function() secGear = tabESP:Section({ Title = "Gear ESP", Opened = true }) end)
-        pcall(function() secGear:Toggle({ Title = "Gear ESP", Type = "Checkbox", Flag = "espGear", Default = false,
-            Callback = function(on) if on then startGearESP() else stopGearESP() end end }) end)
-        pcall(function() secGear:Button({ Title = "Force Rescan", Callback = function()
+        pcall(function() if secGear then secGear:Toggle({ Title = "Gear ESP", Type = "Checkbox", Flag = "espGear", Default = false,
+            Callback = function(on) if on then startGearESP() else stopGearESP() end end }) end end)
+        pcall(function() if secGear then secGear:Button({ Title = "Force Rescan", Callback = function()
             if gearESP.enabled then gearCleanup() checkGear() end
-        end }) end)
+        end }) end end)
     end
 end)
 
