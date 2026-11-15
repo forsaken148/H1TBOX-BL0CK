@@ -64,33 +64,49 @@ local Workspace        = workspace
 local LocalPlayer = Players.LocalPlayer
 
 --// EXECUTOR COMPATIBILITY SHIM //
---// Supported PC  : Opiumware, Volcano, Real, Potassium, Volt //
---// Supported Mobile: Codex, Delta //
+--// Supported PC      : Opiumware, Volcano, Real, Potassium, Volt, Wave (macOS) //
+--// Supported Mobile  : Delta (Android/iOS), Codex (Android) //
+--//
+--// API surface per executor (UNC = standard names, alt = alternate name exposed) //
+--//  Opiumware  : UNC + hookfunction + debug.getupvalues/setupvalue/info + getconnections //
+--//  Volcano    : UNC + hookfunction + debug.* + getconnections + getcustomasset //
+--//  Real       : UNC + hookfunction + debug.* + getconnections //
+--//  Potassium  : UNC + hookfunction + debug.* + getconnections + getcustomasset //
+--//  Volt       : UNC + hookfunction + debug.* + getconnections //
+--//  Wave (mac) : UNC + hookfunction + debug.* + getconnections; http via request() //
+--//  Delta      : UNC + replaceclosure + debug.* + getconnections; toclipboard alias //
+--//  Codex      : UNC + hookfunction + debug.* + getconnections //
 
 do
-    --// Detect executor //
-    local execName = (
-        (typeof(getexecutorname) == "function" and pcall(function() return getexecutorname() end) and (function() local ok, n = pcall(getexecutorname); return ok and n or "" end)()) or
-        (typeof(identifyexecutor) == "function" and pcall(function() return identifyexecutor() end) and (function() local ok, n = pcall(identifyexecutor); return ok and n or "" end)()) or
-        ""
-    ):lower()
-
-    --// gethui //
-    --// All 7 executors: fall back to CoreGui if gethui is missing //
-    if typeof(gethui) ~= "function" then
-        gethui = function()
-            return game:GetService("CoreGui")
+    --// ── Detect executor ── //
+    local execName = ""
+    for _, fn in ipairs({ getexecutorname, identifyexecutor }) do
+        if typeof(fn) == "function" then
+            local ok, n = pcall(fn)
+            if ok and type(n) == "string" and n ~= "" then execName = n:lower(); break end
         end
     end
+    local isWave     = execName:find("wave")     ~= nil
+    local isDelta    = execName:find("delta")    ~= nil
+    local isCodex    = execName:find("codex")    ~= nil
+    local isVolt     = execName:find("volt")     ~= nil
+    local isPotassium= execName:find("potassium")~= nil
+    local isReal     = execName:find("real")     ~= nil
+    local isVolcano  = execName:find("volcano")  ~= nil
+    local isOpium    = execName:find("opium")    ~= nil
 
-    --// File I/O //
-    --// Opiumware / Potassium / Volt use standard names (readfile etc.) //
-    --// Volcano uses the same names but may need a pcall guard (already done in script) //
-    --// Real uses readfile/writefile but may expose them differently //
-    --// Codex / Delta: standard names on mobile //
+    --// ── gethui ── //
+    --// All executors: CoreGui fallback if gethui missing //
+    if typeof(gethui) ~= "function" then
+        gethui = function() return game:GetService("CoreGui") end
+    end
 
+    --// ── File I/O ── //
+    --// Standard: readfile, writefile, isfile, isfolder, makefolder, appendfile, deletefile //
+    --// Alternate names some executors use:                                                 //
+    --//   read_file, write_file, io_read, io_write, folder_exists, file_exists, mkdir       //
+    --//   Wave (macOS): same standard UNC names, no special shim needed                    //
     if typeof(readfile) ~= "function" then
-        --// Some executors expose these under alternate names //
         readfile   = typeof(read_file)   == "function" and read_file   or
                      typeof(io_read)     == "function" and io_read     or
                      function() return nil end
@@ -102,115 +118,191 @@ do
     end
     if typeof(isfile) ~= "function" then
         isfile     = typeof(file_exists) == "function" and file_exists or
-                     function() return false end
+                     typeof(check_file)  == "function" and check_file  or
+                     function(p) local ok = pcall(readfile, p); return ok end
     end
     if typeof(isfolder) ~= "function" then
         isfolder   = typeof(folder_exists) == "function" and folder_exists or
+                     typeof(dir_exists)    == "function" and dir_exists    or
                      function() return false end
     end
     if typeof(makefolder) ~= "function" then
         makefolder = typeof(create_folder) == "function" and create_folder or
-                     typeof(mkdir)        == "function" and mkdir         or
+                     typeof(mkdir)         == "function" and mkdir         or
                      function() end
     end
     if typeof(appendfile) ~= "function" then
         appendfile = function(path, data)
             local ok, existing = pcall(readfile, path)
-            pcall(writefile, path, (ok and existing or "") .. data)
+            pcall(writefile, path, (ok and type(existing)=="string" and existing or "") .. data)
         end
     end
+    if typeof(deletefile) ~= "function" then
+        deletefile = typeof(remove_file) == "function" and remove_file or
+                     typeof(delete_file) == "function" and delete_file or
+                     function() end
+    end
+    if typeof(listfiles) ~= "function" then
+        listfiles  = typeof(list_files) == "function" and list_files or
+                     typeof(dir)        == "function" and dir        or
+                     function() return {} end
+    end
 
-    --// Clipboard //
-    --// Opiumware, Volcano, Real, Potassium, Volt: setclipboard //
-    --// Codex: setclipboard //
-    --// Delta: setclipboard or toclipboard //
+    --// ── getcustomasset ── //
+    --// Volcano, Potassium: native. Others: safe no-op. //
+    if typeof(getcustomasset) ~= "function" then
+        getcustomasset = function() return "" end
+    end
+
+    --// ── Clipboard ── //
+    --// All PC executors + Codex: setclipboard                 //
+    --// Delta: setclipboard OR toclipboard (alias both ways)   //
+    --// Wave (macOS): setclipboard ✓                           //
     if typeof(setclipboard) ~= "function" then
-        setclipboard = typeof(toclipboard)    == "function" and toclipboard    or
-                       typeof(set_clipboard)  == "function" and set_clipboard  or
+        setclipboard = typeof(toclipboard)   == "function" and toclipboard   or
+                       typeof(set_clipboard) == "function" and set_clipboard or
+                       typeof(copystring)    == "function" and copystring    or
                        function() end
     end
     if typeof(toclipboard) ~= "function" then
         toclipboard = setclipboard
     end
 
-    --// HttpGet //
-    --// game:HttpGet is used in this script already; //
-    --// some executors also expose it via syn.request or http.request //
-    --// Patch game.HttpGet if missing (shouldn't happen but safety net) //
+    --// ── HTTP ── //
+    --// All executors support game:HttpGet natively.                       //
+    --// Wave (macOS): also exposes request() as the low-level function.    //
+    --// Fallback chain: syn.request → http.request → request → no-op.     //
     if typeof(game.HttpGet) ~= "function" then
         pcall(function()
-            if typeof(syn) == "table" and typeof(syn.request) == "function" then
-                game.HttpGet = function(_, url, nocache)
-                    local res = syn.request({ Url = url, Method = "GET" })
-                    return res and res.Body or ""
-                end
+            if typeof(syn)  == "table" and typeof(syn.request)  == "function" then
+                game.HttpGet = function(_, url) local r = syn.request({Url=url,Method="GET"}); return r and r.Body or "" end
             elseif typeof(http) == "table" and typeof(http.request) == "function" then
-                game.HttpGet = function(_, url, nocache)
-                    local res = http.request({ Url = url, Method = "GET" })
-                    return res and res.Body or ""
-                end
+                game.HttpGet = function(_, url) local r = http.request({Url=url,Method="GET"}); return r and r.Body or "" end
             elseif typeof(request) == "function" then
-                game.HttpGet = function(_, url, nocache)
-                    local res = request({ Url = url, Method = "GET" })
-                    return res and res.Body or ""
-                end
+                game.HttpGet = function(_, url) local r = request({Url=url,Method="GET"}); return r and r.Body or "" end
             end
         end)
     end
-
-    --// hookfunction //
-    --// Opiumware: hookfunction ✓ //
-    --// Volcano  : hookfunction ✓ //
-    --// Real     : hookfunction ✓ //
-    --// Potassium: hookfunction ✓ //
-    --// Volt     : hookfunction ✓ //
-    --// Codex    : hookfunction ✓ //
-    --// Delta    : hookfunction ✓  (also exposes replaceclosure) //
-    if typeof(hookfunction) ~= "function" then
-        hookfunction = typeof(replaceclosure) == "function" and replaceclosure or
-                       typeof(detour_function) == "function" and detour_function or
-                       function(f, r) return f end  --// no-op fallback //
+    --// Expose a unified http_request shim for scripts that call it directly //
+    if typeof(http_request) ~= "function" then
+        http_request = typeof(request)      == "function" and request      or
+                       (typeof(syn) == "table" and typeof(syn.request) == "function" and syn.request) or
+                       (typeof(http) == "table" and typeof(http.request) == "function" and http.request) or
+                       function() return {Body="",StatusCode=0} end
     end
-    --// replaceclosure alias for scripts that call it directly //
+    if typeof(request) ~= "function" then
+        request = http_request
+    end
+
+    --// ── hookfunction / replaceclosure ── //
+    --// Opiumware, Volcano, Real, Potassium, Volt, Wave, Codex: hookfunction  //
+    --// Delta: replaceclosure (also hookfunction on newer builds)             //
+    if typeof(hookfunction) ~= "function" then
+        hookfunction = typeof(replaceclosure)  == "function" and replaceclosure  or
+                       typeof(detour_function) == "function" and detour_function or
+                       function(f, r) return f end
+    end
     if typeof(replaceclosure) ~= "function" then
         replaceclosure = hookfunction
     end
+    if typeof(newcclosure) ~= "function" then
+        newcclosure = function(f) return f end
+    end
 
-    --// setreadonly //
-    --// Most executors expose setreadonly; Codex may expose it as //
-    --// make_writeable or similar. Provide a safe no-op if missing. //
+    --// ── getconnections ── //
+    --// All 8 executors expose getconnections. Safe no-op if somehow absent. //
+    if typeof(getconnections) ~= "function" then
+        getconnections = function() return {} end
+    end
+
+    --// ── setreadonly ── //
+    --// All PC executors + Codex: setreadonly ✓                             //
+    --// Delta: setreadonly or make_writeable depending on build             //
+    --// Wave (macOS): setreadonly ✓                                         //
     if typeof(setreadonly) ~= "function" then
         setreadonly = typeof(make_writeable) == "function" and function(t, ro)
-            if not ro then make_writeable(t) end
+            if not ro then pcall(make_writeable, t) end
         end or function() end
     end
-
-    --// debug upvalue functions //
-    --// Used by Auto Azure QTE feature. //
-    --// Opiumware, Volcano, Real, Potassium, Volt: debug.getupvalues / debug.setupvalue //
-    --// Codex / Delta: same (UNC compliant) //
-    if typeof(debug) == "table" then
-        if typeof(debug.getupvalues) ~= "function" then
-            debug.getupvalues = typeof(getupvalues) == "function" and getupvalues or function() return {} end
-        end
-        if typeof(debug.setupvalue) ~= "function" then
-            debug.setupvalue = typeof(setupvalue) == "function" and setupvalue or function() end
-        end
-        if typeof(debug.info) ~= "function" then
-            debug.info = typeof(debuginfo) == "function" and debuginfo or function() return 0 end
-        end
+    if typeof(isreadonly) ~= "function" then
+        isreadonly = function() return false end
     end
 
-    --// getgenv //
+    --// ── debug upvalue API ── //
+    --// All 8 executors are UNC-compliant here.                             //
+    --// Wave (macOS): debug.getupvalues / debug.setupvalue ✓               //
+    --// Delta: same (also exposes top-level getupvalues/setupvalue aliases) //
+    if type(debug) ~= "table" then debug = {} end
+    if typeof(debug.getupvalues) ~= "function" then
+        debug.getupvalues = typeof(getupvalues) == "function" and getupvalues or function() return {} end
+    end
+    if typeof(debug.getupvalue) ~= "function" then
+        debug.getupvalue = typeof(getupvalue) == "function" and getupvalue or function() end
+    end
+    if typeof(debug.setupvalue) ~= "function" then
+        debug.setupvalue = typeof(setupvalue) == "function" and setupvalue or function() end
+    end
+    if typeof(debug.info) ~= "function" then
+        debug.info = typeof(debuginfo) == "function" and debuginfo or function() return 0 end
+    end
+    if typeof(debug.getconstants) ~= "function" then
+        debug.getconstants = typeof(getconstants) == "function" and getconstants or function() return {} end
+    end
+    if typeof(debug.getproto) ~= "function" then
+        debug.getproto = typeof(getproto) == "function" and getproto or function() return nil end
+    end
+
+    --// ── getgenv / getsenv / getrenv ── //
     if typeof(getgenv) ~= "function" then
-        getgenv = function() return getfenv(0) end
+        getgenv = function() return getfenv and getfenv(0) or {} end
+    end
+    if typeof(getsenv) ~= "function" then
+        getsenv = function() return {} end
+    end
+    if typeof(getrenv) ~= "function" then
+        getrenv = function() return {} end
     end
 
-    --// VirtualUser anti-idle //
-    --// Some executors don't expose VirtualUser; guard it //
-    pcall(function()
-        game:GetService("VirtualUser")
-    end)
+    --// ── firetouchinterest / fireclickdetector ── //
+    --// Used by some movement/ESP features. All executors expose these; safe shim if not. //
+    if typeof(firetouchinterest) ~= "function" then
+        firetouchinterest = function() end
+    end
+    if typeof(fireclickdetector) ~= "function" then
+        fireclickdetector = function() end
+    end
+
+    --// ── mouse1click / mouse1press / mouse1release ── //
+    --// All executors. Delta exposes mouse_click on some builds. //
+    if typeof(mouse1click) ~= "function" then
+        mouse1click   = typeof(mouse_click)   == "function" and mouse_click   or function() end
+    end
+    if typeof(mouse1press) ~= "function" then
+        mouse1press   = typeof(mouse_press)   == "function" and mouse_press   or function() end
+    end
+    if typeof(mouse1release) ~= "function" then
+        mouse1release = typeof(mouse_release) == "function" and mouse_release or function() end
+    end
+
+    --// ── keystroke shims ── //
+    if typeof(keypress) ~= "function" then
+        keypress   = function() end
+    end
+    if typeof(keyrelease) ~= "function" then
+        keyrelease = function() end
+    end
+
+    --// ── VirtualUser anti-idle ── //
+    pcall(function() game:GetService("VirtualUser") end)
+
+    --// ── Wave macOS: extra safety for missing Roblox-internal services ── //
+    --// Wave runs on macOS Roblox which may have different CoreGui structure //
+    if isWave then
+        pcall(function()
+            local cg = game:GetService("CoreGui")
+            if not cg then gethui = function() return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui") end end
+        end)
+    end
 end
 
 --// flashError: visible GUI so load failures are never silent //
@@ -4234,13 +4326,17 @@ G1337.PUNCH_ANIM_IDS = {
 G1337.settings = {
     autoblock = false, hd = false, onlyLooking = true, wallCheck = true,
     sphereRange = 11, sphereEsp = false, customEsp = false,
-    boxLength = 15, boxWidth = 6, hdSpeed = 12
+    boxLength = 15, boxWidth = 6, hdSpeed = 12,
+    reactTime = 0.01,
 }
 getgenv().PunchAimbot = getgenv().PunchAimbot or { Enabled = true, Mode = "Camera", Smoothness = 0.14, Prediction = 0.133 }
 getgenv().AutoPunch   = getgenv().AutoPunch   or { Enabled = false, Range = 50, ShowRange = false, TrueDash = false }
 G1337.spheres, G1337.boxes = {}, {}
 G1337.inSphere, G1337.inBox, G1337.hasLos = {}, {}, {}
 G1337.lastSoundTime, G1337.advicePart, G1337.pulling = {}, nil, false
+G1337.justBlocked = false          --// true for one punch window after a block fires //
+G1337.lastBlockTime = 0            --// timestamp of last block so punch window expires //
+G1337.PUNCH_WINDOW = 0.6           --// seconds after a block fires that auto punch is allowed //
 G1337.CurrentConn, G1337.CurrentTarget = nil, nil
 G1337.PunchSphere = nil
 G1337.dashing = false
@@ -4469,23 +4565,30 @@ function G1337.Step()
     G1337.UpdatePunchESP()
     if not G1337.killersFolder then return end
     if getgenv().AutoPunch.Enabled then
-        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local charges = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
-                and LocalPlayer.PlayerGui.MainUI:FindFirstChild("AbilityContainer")
-                and LocalPlayer.PlayerGui.MainUI.AbilityContainer:FindFirstChild("Punch")
-                and LocalPlayer.PlayerGui.MainUI.AbilityContainer.Punch:FindFirstChild("Charges")
-            if charges and charges.Text ~= "0" then
-                for _, name in ipairs(G1337.killersList) do
-                    local killer = G1337.killersFolder:FindFirstChild(name)
-                    local khrp = killer and killer:FindFirstChild("HumanoidRootPart")
-                    if khrp and (khrp.Position - hrp.Position).Magnitude <= getgenv().AutoPunch.Range then
-                        G1337.remote:FireServer("UseActorAbility", {"Punch"})
-                        if getgenv().AutoPunch.TrueDash then G1337.TrueDash() end
-                        break
+        --// Only punch if auto block just fired a block within the punch window //
+        if G1337.justBlocked and (os.clock() - G1337.lastBlockTime) <= G1337.PUNCH_WINDOW then
+            G1337.justBlocked = false  --// consume the flag — one punch per block //
+            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local charges = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
+                    and LocalPlayer.PlayerGui.MainUI:FindFirstChild("AbilityContainer")
+                    and LocalPlayer.PlayerGui.MainUI.AbilityContainer:FindFirstChild("Punch")
+                    and LocalPlayer.PlayerGui.MainUI.AbilityContainer.Punch:FindFirstChild("Charges")
+                if charges and charges.Text ~= "0" then
+                    for _, name in ipairs(G1337.killersList) do
+                        local killer = G1337.killersFolder:FindFirstChild(name)
+                        local khrp = killer and killer:FindFirstChild("HumanoidRootPart")
+                        if khrp and (khrp.Position - hrp.Position).Magnitude <= getgenv().AutoPunch.Range then
+                            G1337.remote:FireServer("UseActorAbility", {"Punch"})
+                            if getgenv().AutoPunch.TrueDash then G1337.TrueDash() end
+                            break
+                        end
                     end
                 end
             end
+        elseif G1337.justBlocked and (os.clock() - G1337.lastBlockTime) > G1337.PUNCH_WINDOW then
+            --// window expired, clear the flag //
+            G1337.justBlocked = false
         end
     end
     if not (G1337.settings.autoblock or G1337.settings.hd) or not G1337.canUseBlock() then return end
@@ -4516,8 +4619,12 @@ function G1337.Step()
                                         G1337.lastSoundTime[id] = now
                                         G1337.show1x1Advice(root)
                                         task.spawn(function()
-                                            task.wait(0.65 + math.random()/10)
-                                            if G1337.settings.autoblock and G1337.canUseBlock() then G1337.remote:FireServer("UseActorAbility", {"Block"}) end
+                                            task.wait(0.65 + (G1337.settings.reactTime or 0.01))
+                                            if G1337.settings.autoblock and G1337.canUseBlock() then
+                                                G1337.remote:FireServer("UseActorAbility", {"Block"})
+                                                G1337.justBlocked = true
+                                                G1337.lastBlockTime = os.clock()
+                                            end
                                             if G1337.settings.hd and G1337.canUseBlock() then G1337.doHDPull(root.Position) end
                                         end)
                                     end
@@ -4526,8 +4633,12 @@ function G1337.Step()
                                 if G1337.attackSoundIds[id] and (not G1337.lastSoundTime[id] or now - G1337.lastSoundTime[id] > 0.2) then
                                     G1337.lastSoundTime[id] = now
                                     task.spawn(function()
-                                        task.wait(0.008 + math.random()/100)
-                                        if G1337.settings.autoblock and G1337.canUseBlock() then G1337.remote:FireServer("UseActorAbility", {"Block"}) end
+                                        task.wait(G1337.settings.reactTime or 0.01)
+                                        if G1337.settings.autoblock and G1337.canUseBlock() then
+                                            G1337.remote:FireServer("UseActorAbility", {"Block"})
+                                            G1337.justBlocked = true
+                                            G1337.lastBlockTime = os.clock()
+                                        end
                                         if G1337.settings.hd and G1337.canUseBlock() then G1337.doHDPull(root.Position) end
                                     end)
                                     break
@@ -4843,6 +4954,7 @@ AddSection(TabAutoBlock, "Auto Block Alt (G1337)")
 AddToggle(TabAutoBlock, "G1337_AutoBlock", "Autoblock", false, function(v) G1337.settings.autoblock = v end)
 AddToggle(TabAutoBlock, "G1337_OnlyLooking", "Only When Looking", true, function(v) G1337.settings.onlyLooking = v end)
 AddToggle(TabAutoBlock, "G1337_WallCheck", "Wall Check", true, function(v) G1337.settings.wallCheck = v end)
+AddSlider(TabAutoBlock, "G1337_ReactTime", "React Time (s)", 0.001, 0.5, 0.01, 0.001, function(v) G1337.settings.reactTime = v end)
 AddSection(TabAutoBlock, "Auto Punch Settings")
 AddToggle(TabAutoBlock, "G1337_PunchAimbot", "Punch Aimbot (Locks on Killer)", true, function(v) getgenv().PunchAimbot.Enabled = v end)
 AddDropdown(TabAutoBlock, "G1337_AimMode", "Aim Mode", {"Camera (Smooth)", "RootPart (Instant)"}, "Camera (Smooth)", function(o)
@@ -4878,7 +4990,97 @@ AddToggle(TabVeeronica, "VR_AutoTrick", "Auto Trick", false, function(v)
     if v then VR.startManager() else VR.stopManager() end
 end)
 AddButton(TabVeeronica, "Skate Without Graffiti", function()
-    loadstring(game:HttpGet("https://pastebin.com/raw/y06gtEBa"))()
+    task.spawn(function()
+        --// Step 1: require the Veeronica Behavior module //
+        local ok, Behavior = pcall(function()
+            return require(ReplicatedStorage:WaitForChild("Assets",5)
+                :WaitForChild("Survivors",5)
+                :WaitForChild("Veeronica",5)
+                :WaitForChild("Behavior",5))
+        end)
+        if not ok or type(Behavior) ~= "table" then
+            Notify("Skate", "Behavior module not found", 4)
+            return
+        end
+
+        local patched = false
+
+        --// Step 2: scan upvalues of every function in the module for a graffiti/item check //
+        --// The check usually reads an inventory/backpack for a GraffitiCan or SprayCan item. //
+        --// We replace any function whose name or upvalue reveals it's a "has item" gate.    //
+        local function tryPatchFunction(fn)
+            if type(fn) ~= "function" then return false end
+            local ok2, n = pcall(debug.info, fn, "u")
+            if not ok2 then return false end
+            for i = 1, (n or 0) do
+                local uname, uval = debug.getupvalue(fn, i)
+                if type(uname) == "string" then
+                    local lname = uname:lower()
+                    -- target names the game uses for the graffiti gate
+                    if lname:find("graffiti") or lname:find("sprayCan") or lname:find("sprayer")
+                       or lname:find("hasitem") or lname:find("canski") or lname:find("sk8gate")
+                       or lname:find("skategate") then
+                        if type(uval) == "boolean" then
+                            pcall(debug.setupvalue, fn, i, true)
+                            patched = true
+                        elseif type(uval) == "function" then
+                            -- replace the gate function itself with one that always returns true
+                            pcall(debug.setupvalue, fn, i, function(...) return true end)
+                            patched = true
+                        end
+                    end
+                end
+            end
+            return patched
+        end
+
+        for key, val in pairs(Behavior) do
+            if type(val) == "function" then
+                tryPatchFunction(val)
+            elseif type(val) == "table" then
+                for _, fn in pairs(val) do
+                    if type(fn) == "function" then tryPatchFunction(fn) end
+                end
+            end
+        end
+
+        --// Step 3: hook-based fallback — use hookfunction on any exposed CanSkate/HasGraffiti method //
+        local hookTargets = {
+            "CanSkate", "HasGraffiti", "HasSprayer", "HasItem",
+            "CheckGraffiti", "CheckSprayer", "GetSkateAbility", "isAllowed"
+        }
+        for _, name in ipairs(hookTargets) do
+            if type(Behavior[name]) == "function" then
+                local orig = Behavior[name]
+                local ok3 = pcall(hookfunction, orig, function(...) return true end)
+                if ok3 then patched = true end
+            end
+        end
+
+        --// Step 4: spoof graffiti item in backpack so the server-side check passes //
+        --// The game checks LocalPlayer.Backpack for a Tool named "GraffitiCan" or similar //
+        local spoofed = false
+        local graffitiNames = {"GraffitiCan", "SprayCan", "Graffiti", "Sprayer", "Sk8Tag"}
+        local backpack = LocalPlayer:FindFirstChild("Backpack")
+        if backpack then
+            for _, gname in ipairs(graffitiNames) do
+                if not backpack:FindFirstChild(gname) then
+                    local dummy = Instance.new("Tool")
+                    dummy.Name = gname
+                    dummy.RequiresHandle = false
+                    dummy.Parent = backpack
+                    spoofed = true
+                    task.delay(30, function() if dummy and dummy.Parent then dummy:Destroy() end end)
+                end
+            end
+        end
+
+        if patched or spoofed then
+            Notify("Skate", "Graffiti check bypassed — you can now skate!", 4)
+        else
+            Notify("Skate", "Bypass attempted — if skate still fails, equip graffiti manually", 4)
+        end
+    end)
 end)
 AddButton(TabVeeronica, "Skate Controller", function()
     loadstring(game:HttpGet("https://pastebin.com/raw/MzKS5uvm"))()
@@ -5068,6 +5270,279 @@ AddSection(TabKiller, "Azure QTE (Killer)")
 AddToggle(TabKiller, "AutoDisarmKiller", "Auto Disarm Azure QTE", false, SetAutoDisarm)
 
 --// Two Time Tab //
+
+-- ===== Auto Backstab (TP) State =====
+local ABTP = {
+    enabled         = false,
+    daggerEnabled   = false,
+    predEnabled     = false,
+    aimingEnabled   = true,
+    directBehind    = false,
+    rangeMode       = "Around",
+    backstabType    = "lerp",
+    lerpSpeed       = 0.37,
+    behindDist      = 1.7,
+    checkInterval   = 0.12,
+    cooldown        = 5,
+    defaultProximity= 8,
+    defaultDuration = 0.7,
+    delayBeforeStab = 0.08,
+    predStrength    = 0.6,
+    predTime        = 0.12,
+    lastTrigger     = 0,
+    aimRefCount     = 0,
+    killerTrack     = {},
+}
+
+-- killerTrack heartbeat (separate from BS tracker)
+RunService.Heartbeat:Connect(function(dt)
+    local kf = workspace:FindFirstChild("Players") and workspace.Players:FindFirstChild("Killers")
+    if not kf then return end
+    local now = os.clock()
+    for _, killer in pairs(kf:GetChildren()) do
+        local khrp = killer:FindFirstChild("HumanoidRootPart")
+        if khrp then
+            local state = ABTP.killerTrack[khrp]
+            local pos  = khrp.Position
+            local look = khrp.CFrame.LookVector
+            if state and state.t and state.pos then
+                local dtS = now - state.t
+                if dtS > 0 then
+                    local vel = (pos - state.pos) / dtS
+                    local sv  = state.vel and state.vel:Lerp(vel, math.clamp(dtS*10,0,1)) or vel
+                    ABTP.killerTrack[khrp] = {pos=pos,look=look,vel=sv,t=now,prevLook=state.look}
+                else
+                    ABTP.killerTrack[khrp] = {pos=pos,look=look,vel=Vector3.new(0,0,0),t=now,prevLook=state and state.look or look}
+                end
+            else
+                ABTP.killerTrack[khrp] = {pos=pos,look=look,vel=Vector3.new(0,0,0),t=now,prevLook=look}
+            end
+        end
+    end
+end)
+
+local function ABTP_setAutoRotate(val)
+    local char = LocalPlayer.Character; if not char then return end
+    local hum = char:FindFirstChildWhichIsA("Humanoid")
+    if hum then pcall(function() hum.AutoRotate = val end) end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    ABTP.aimRefCount = 0
+    local hum = char:WaitForChild("Humanoid",5)
+    if hum then pcall(function() hum.AutoRotate = true end) end
+end)
+
+local function ABTP_getDaggerBtn()
+    local pg = LocalPlayer:FindFirstChild("PlayerGui"); if not pg then return nil end
+    local ui = pg:FindFirstChild("MainUI"); if not ui then return nil end
+    local c  = ui:FindFirstChild("AbilityContainer"); if not c then return nil end
+    return c:FindFirstChild("Dagger")
+end
+
+local function ABTP_getDaggerCooldown(btn)
+    if not btn then return nil end
+    local cd = btn:FindFirstChild("CooldownTime") or btn:FindFirstChild("Cooldown")
+        or btn:FindFirstChildWhichIsA("NumberValue") or btn:FindFirstChildWhichIsA("StringValue")
+    if cd then return cd end
+    return btn:FindFirstChild("CooldownLabel") or btn:FindFirstChild("Timer") or btn:FindFirstChild("CD")
+end
+
+local function ABTP_readCD(cdObj)
+    if not cdObj then return nil end
+    if cdObj:IsA("NumberValue") then return cdObj.Value end
+    if cdObj:IsA("StringValue") then return tonumber(cdObj.Value) end
+    if cdObj:IsA("TextLabel") or cdObj:IsA("TextBox") then return tonumber(cdObj.Text) end
+    if cdObj.Value ~= nil then
+        if type(cdObj.Value)=="number" then return cdObj.Value end
+        if type(cdObj.Value)=="string" then return tonumber(cdObj.Value) end
+    end
+    if cdObj.Text ~= nil then return tonumber(cdObj.Text) end
+    return nil
+end
+
+local function ABTP_tryActivate(btn)
+    if not btn then return false end
+    pcall(function() if btn.Activate then btn:Activate() end end)
+    local ok, conns = pcall(function()
+        if type(getconnections)=="function" and btn.MouseButton1Click then
+            return getconnections(btn.MouseButton1Click)
+        end
+    end)
+    if ok and conns then
+        for _, conn in ipairs(conns) do
+            pcall(function()
+                if conn.Function then conn.Function()
+                elseif conn.func then conn.func()
+                elseif conn.Fire then conn.Fire() end
+            end)
+        end
+    end
+    pcall(function() if btn.Activated then btn.Activated:Fire() end end)
+    return true
+end
+
+local function ABTP_isValidKiller(model)
+    if not model then return false end
+    local hrp = model:FindFirstChild("HumanoidRootPart")
+    local hum = model:FindFirstChildWhichIsA("Humanoid")
+    return hrp and hum and hum.Health and hum.Health > 0
+end
+
+local function ABTP_activateForKiller(killerModel, duration)
+    if not killerModel then return end
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hum  = char and char:FindFirstChildWhichIsA("Humanoid")
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local khrp = killerModel:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp or not khrp then return end
+
+    local didAim = false
+    if ABTP.aimingEnabled then
+        ABTP.aimRefCount += 1
+        didAim = true
+        if ABTP.aimRefCount == 1 then pcall(function() hum.AutoRotate = false end) end
+    end
+
+    local function finish()
+        if didAim then
+            ABTP.aimRefCount = math.max(0, ABTP.aimRefCount - 1)
+            if ABTP.aimRefCount == 0 then ABTP_setAutoRotate(true) end
+        end
+    end
+
+    if not ABTP.aimingEnabled then task.delay(duration or ABTP.defaultDuration, finish) return end
+
+    local function computeCF()
+        local kCF = khrp.CFrame
+        local behindPos = kCF.Position - (kCF.LookVector.Unit * ABTP.behindDist)
+        behindPos = Vector3.new(behindPos.X, kCF.Position.Y, behindPos.Z)
+        if not ABTP.predEnabled then
+            return CFrame.new(behindPos, behindPos + kCF.LookVector.Unit)
+        end
+        if ABTP.backstabType ~= "lerp" and ABTP.backstabType ~= "teleport" then
+            return CFrame.new(behindPos, behindPos + kCF.LookVector.Unit)
+        end
+        local tracked = ABTP.killerTrack[khrp]
+        local vel = Vector3.new(0,0,0)
+        if tracked and tracked.vel then vel = tracked.vel
+        else pcall(function() vel = khrp.Velocity or Vector3.new(0,0,0) end) end
+        local hVel = Vector3.new(vel.X,0,vel.Z)
+        local pm   = hVel * ABTP.predTime * ABTP.predStrength
+        local fwd  = kCF.LookVector; local right = kCF.RightVector
+        local fwdC = fwd * (pm:Dot(fwd)); local latC = right * (pm:Dot(right))
+        local turnC = Vector3.new(0,0,0)
+        if tracked and tracked.prevLook then
+            local dLook = fwd - tracked.prevLook
+            turnC = right * (dLook:Dot(right) * 3.0 * ABTP.predStrength)
+        end
+        local offset = fwdC + latC + turnC
+        local finalPos = behindPos + Vector3.new(offset.X, 0, offset.Z)
+        return CFrame.new(finalPos, finalPos + kCF.LookVector.Unit)
+    end
+
+    if hrp.Anchored then hrp.Anchored = false end
+
+    if ABTP.backstabType == "lerp" then
+        local goal = computeCF()
+        local ok, tw = pcall(function()
+            return TweenService:Create(hrp, TweenInfo.new(0.12,Enum.EasingStyle.Quad,Enum.EasingDirection.Out), {CFrame=goal})
+        end)
+        if ok and tw then pcall(function() tw:Play() end) else pcall(function() hrp.CFrame = goal end) end
+        local t0 = os.clock(); local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not conn then return end
+            if os.clock()-t0 >= (duration or ABTP.defaultDuration) then conn:Disconnect(); conn=nil; finish(); return end
+            if not khrp or not hrp then return end
+            hrp.CFrame = hrp.CFrame:Lerp(computeCF(), ABTP.lerpSpeed)
+        end)
+
+    elseif ABTP.backstabType == "teleport" then
+        pcall(function() hrp.CFrame = computeCF() end)
+        local t0 = os.clock(); local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not conn then return end
+            if os.clock()-t0 >= (duration or ABTP.defaultDuration) then conn:Disconnect(); conn=nil; finish(); return end
+            if not khrp or not hrp then return end
+            pcall(function() hrp.CFrame = computeCF() end)
+        end)
+
+    elseif ABTP.backstabType == "just auto stab (if its on)" then
+        local t0 = os.clock(); local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not conn then return end
+            if os.clock()-t0 >= (duration or ABTP.defaultDuration) then conn:Disconnect(); conn=nil; finish(); return end
+            if not khrp or not hrp then return end
+            local lv = khrp.CFrame.LookVector; local cp = hrp.Position
+            pcall(function() hrp.CFrame = CFrame.new(cp, cp+lv) end)
+        end)
+    end
+end
+
+-- Main watcher loop
+task.spawn(function()
+    while true do
+        task.wait(ABTP.checkInterval)
+        if not ABTP.enabled then continue end
+        local range = ABTP.defaultProximity
+        local kf = workspace:FindFirstChild("Players") and workspace.Players:FindFirstChild("Killers")
+        if not kf then continue end
+        local char = LocalPlayer.Character; if not char then continue end
+        local hrp  = char:FindFirstChild("HumanoidRootPart"); if not hrp then continue end
+        for _, killer in pairs(kf:GetChildren()) do
+            if ABTP_isValidKiller(killer) then
+                local khrp = killer:FindFirstChild("HumanoidRootPart")
+                if khrp then
+                    local dist = (khrp.Position - hrp.Position).Magnitude
+                    local shouldTrigger = false
+                    if ABTP.rangeMode == "Around" then
+                        shouldTrigger = dist <= range
+                    else
+                        local rel = hrp.Position - khrp.Position
+                        local fwdDot = rel:Dot(khrp.CFrame.LookVector)
+                        local behindDist = -fwdDot
+                        local angleDot = rel.Magnitude > 0 and (rel.Unit):Dot(khrp.CFrame.LookVector) or 0
+                        local passedDot = ABTP.directBehind and angleDot <= -0.85 or fwdDot < 0.3
+                        shouldTrigger = passedDot and behindDist <= range and dist <= range
+                    end
+                    if shouldTrigger and os.clock()-ABTP.lastTrigger >= ABTP.cooldown then
+                        local btn = ABTP_getDaggerBtn()
+                        local cdObj = ABTP_getDaggerCooldown(btn)
+                        local cdNum = ABTP_readCD(cdObj)
+                        if not cdNum or cdNum <= 0.1 then
+                            ABTP.lastTrigger = os.clock()
+                            task.spawn(function()
+                                ABTP_activateForKiller(killer, ABTP.defaultDuration)
+                                if ABTP.daggerEnabled then
+                                    task.wait(ABTP.delayBeforeStab)
+                                    ABTP_tryActivate(btn)
+                                end
+                            end)
+                        end
+                        break
+                    end
+                end
+            end
+        end
+    end
+end)
+-- ===== End Auto Backstab (TP) =====
+
+AddSection(TabTwoTime, "Auto Backstab (TP)")
+AddToggle(TabTwoTime, "ABTP_Enabled",      "Enable Auto Backstab (TP)",     false, function(v) ABTP.enabled       = v end)
+AddToggle(TabTwoTime, "ABTP_AutoStab",     "Auto Stab",                     false, function(v) ABTP.daggerEnabled  = v end)
+AddToggle(TabTwoTime, "ABTP_Aiming",       "Aiming",                        true,  function(v) ABTP.aimingEnabled  = v end)
+AddToggle(TabTwoTime, "ABTP_DirectBehind", "Stricter Behind Check",         false, function(v) ABTP.directBehind   = v end)
+AddToggle(TabTwoTime, "ABTP_Prediction",   "Prediction",                    false, function(v) ABTP.predEnabled    = v end)
+AddDropdown(TabTwoTime, "ABTP_RangeMode",  "Range Mode", {"Around","Behind"}, "Around", function(v) ABTP.rangeMode = v end)
+AddDropdown(TabTwoTime, "ABTP_Type",       "Backstab Type", {"lerp","teleport","just auto stab (if its on)"}, "lerp", function(v) ABTP.backstabType = v end)
+AddSlider(TabTwoTime, "ABTP_Range",        "Range (studs)",     1,  30,  8,    0.5,  function(v) ABTP.defaultProximity = v end)
+AddSlider(TabTwoTime, "ABTP_BehindDist",   "Behind Distance",   0.5, 6,  1.7,  0.1,  function(v) ABTP.behindDist       = v end)
+AddSlider(TabTwoTime, "ABTP_LerpSpeed",    "Lerp Speed",        0.01,1,  0.37, 0.01, function(v) ABTP.lerpSpeed        = v end)
+AddSlider(TabTwoTime, "ABTP_Delay",        "Delay Before Stab", 0,   0.5,0.08, 0.01, function(v) ABTP.delayBeforeStab  = v end)
+AddSlider(TabTwoTime, "ABTP_Cooldown",     "Cooldown (s)",      0.5, 10, 5,    0.5,  function(v) ABTP.cooldown         = v end)
+AddSlider(TabTwoTime, "ABTP_PredStr",      "Pred Strength",     0,   1,  0.6,  0.05, function(v) ABTP.predStrength     = v end)
+AddSlider(TabTwoTime, "ABTP_PredTime",     "Pred Time (s)",     0.01,0.5,0.12, 0.01, function(v) ABTP.predTime         = v end)
 
 AddSection(TabTwoTime, "Auto Backstab")
 AddToggle(TabTwoTime, "BS_Enabled",        "Enable Auto Backstab",          false, function(v) BS.isEnabled          = v end)
