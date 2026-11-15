@@ -427,14 +427,16 @@ local _cacheFile = "FlexSaken_WindUI.lua"
 local _uiUrls = {
     "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
     "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua",
-    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+    "https://raw.githubusercontent.com/Footagesus/WindUI/master/dist/main.lua",
+    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
 }
 --// Try loading from disk cache first (avoids network entirely on re-runs) //
 local _cached = pcall(function()
     if isfile and isfile(_cacheFile) then
         local src = readfile(_cacheFile)
         if src and #src > 500 then
-            local lib = loadstring(src)()
+            local chunk = loadstring(src)
+            local lib = chunk and chunk()
             if lib then WindUI = lib end
         end
     end
@@ -447,7 +449,9 @@ if not WindUI then
             if not src or #src < 500 then error("empty response") end
             --// Save to disk for next run //
             pcall(function() if writefile then writefile(_cacheFile, src) end end)
-            return loadstring(src)()
+            local chunk = loadstring(src)
+            if not chunk then error("loadstring returned nil") end
+            return chunk()
         end)
         if ok and result then WindUI = result; break end
         task.wait(1)
@@ -463,7 +467,9 @@ if not WindUI then
                 local src = game:HttpGet(url, true)
                 if not src or #src < 500 then error("empty response") end
                 pcall(function() if writefile then writefile(_cacheFile, src) end end)
-                return loadstring(src)()
+                local chunk = loadstring(src)
+                if not chunk then error("loadstring returned nil") end
+                return chunk()
             end)
             if ok and result then WindUI = result; break end
         end
