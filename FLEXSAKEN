@@ -3785,13 +3785,22 @@ local function StopFourthButton()
     FourthBlock.running = false
     for _, c in ipairs(FourthBlock.connections) do pcall(function() c:Disconnect() end) end
     FourthBlock.connections = {}
-    if FourthBlock.instance and FourthBlock.instance.Parent then
-        pcall(function() FourthBlock.instance:Destroy() end)
+    --// Keep the button visible — tint red to show it's off //
+    local b = FourthBlock.instance
+    if b and b.Parent then
+        local redCol = Color3.fromRGB(255, 0, 0)
+        pcall(function()
+            if b:IsA("ImageButton") or b:IsA("ImageLabel") then b.ImageColor3 = redCol end
+            for _, d in ipairs(b:GetDescendants()) do
+                if d:IsA("ImageLabel") or d:IsA("ImageButton") then
+                    d.ImageColor3 = redCol
+                elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then
+                    d.BackgroundColor3 = redCol
+                end
+            end
+        end)
     end
-    FourthBlock.instance = nil
-    FourthBlock.cachedPos = nil
-    FourthBlock.cachedSize = nil
-    FourthBlock.sourceName = nil
+    --// Do NOT nil or destroy instance — button stays on screen //
     print("[FlexSaken] AutoBlockButton OFF")
 end
 
@@ -4379,11 +4388,35 @@ function G1337.isHelpless()
 end
 function G1337.canUseBlock()
     if G1337.isHelpless() then return false end
+    --// Try the Clipping size check first //
     local ok, clip = pcall(function()
         return LocalPlayer.PlayerGui.MainUI.AbilityContainer.Block.Clipping
     end)
-    if not ok or not clip then return false end
-    return clip.Size == UDim2.new(1,0,1,0)
+    if ok and clip then
+        --// Clipping at full size = block is off cooldown //
+        if clip.Size == UDim2.new(1,0,1,0) then return true end
+        --// Also accept if clip is >= 0.95 in Y (nearly full = ready) //
+        if clip.Size.Y.Scale >= 0.95 then return true end
+        --// If clipping exists but is at 0,0 = fully on cooldown — block not ready //
+        if clip.Size.Y.Scale <= 0.01 then return false end
+        --// Otherwise treat partial clip as ready (conservative fallback) //
+        return true
+    end
+    --// Fallback: if we can't find the clip element, check for a CooldownTime value //
+    local ok2, btn = pcall(function()
+        return LocalPlayer.PlayerGui.MainUI.AbilityContainer.Block
+    end)
+    if ok2 and btn then
+        local cd = btn:FindFirstChild("CooldownTime") or btn:FindFirstChild("Cooldown")
+            or btn:FindFirstChildWhichIsA("NumberValue")
+        if cd and type(cd.Value) == "number" then
+            return cd.Value <= 0.05
+        end
+        --// No cooldown child found — assume block is usable //
+        return true
+    end
+    --// Can't determine state at all — allow it and let server reject if needed //
+    return true
 end
 function G1337.hasLineOfSight(targetRoot)
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return false end
@@ -4655,6 +4688,81 @@ function G1337.Step()
 end
 
 RunService.Heartbeat:Connect(function() pcall(G1337.Step) end)
+
+--// Sound hook: catch attack sounds the instant they play, not on next Heartbeat poll //
+--// This fixes the race condition where sound.Playing is already false by the time Step runs //
+local G1337_soundConns = {}
+local function G1337_hookKillerSounds(killerModel)
+    if not killerModel then return end
+    local name = killerModel.Name
+    --// Hook all existing sounds //
+    local function hookSound(sound)
+        if not sound:IsA("Sound") then return end
+        local conn = sound.Played:Connect(function()
+            if not G1337.settings.autoblock and not G1337.settings.hd then return end
+            local id = sound.SoundId:match("%d+") or ""
+            local now = os.clock()
+            --// 1x1 special sound //
+            if name == "1x1x1x1" and id == G1337.special1x1Sound then
+                if not G1337.lastSoundTime[id] or now - G1337.lastSoundTime[id] > 1 then
+                    G1337.lastSoundTime[id] = now
+                    local root = killerModel:FindFirstChild("HumanoidRootPart")
+                    if root then G1337.show1x1Advice(root) end
+                    task.spawn(function()
+                        task.wait(0.65 + (G1337.settings.reactTime or 0.01))
+                        if G1337.settings.autoblock and G1337.canUseBlock() then
+                            G1337.remote:FireServer("UseActorAbility", {"Block"})
+                        end
+                        local root2 = killerModel:FindFirstChild("HumanoidRootPart")
+                        if G1337.settings.hd and G1337.canUseBlock() and root2 then
+                            G1337.doHDPull(root2.Position)
+                        end
+                    end)
+                end
+                return
+            end
+            --// Normal attack sound //
+            if G1337.attackSoundIds[id] and (not G1337.lastSoundTime[id] or now - G1337.lastSoundTime[id] > 0.2) then
+                G1337.lastSoundTime[id] = now
+                task.spawn(function()
+                    task.wait(G1337.settings.reactTime or 0.01)
+                    if G1337.settings.autoblock and G1337.canUseBlock() then
+                        G1337.remote:FireServer("UseActorAbility", {"Block"})
+                    end
+                    local root2 = killerModel:FindFirstChild("HumanoidRootPart")
+                    if G1337.settings.hd and G1337.canUseBlock() and root2 then
+                        G1337.doHDPull(root2.Position)
+                    end
+                end)
+            end
+        end)
+        table.insert(G1337_soundConns, conn)
+    end
+    --// Hook existing sounds //
+    for _, d in ipairs(killerModel:GetDescendants()) do hookSound(d) end
+    --// Hook sounds added later (some killers stream them in) //
+    local dc = killerModel.DescendantAdded:Connect(hookSound)
+    table.insert(G1337_soundConns, dc)
+end
+
+--// Hook killers already in the folder //
+local function G1337_hookAllKillers()
+    local kf = workspace:FindFirstChild("Players") and workspace.Players:FindFirstChild("Killers")
+    if not kf then return end
+    for _, k in ipairs(kf:GetChildren()) do G1337_hookKillerSounds(k) end
+    kf.ChildAdded:Connect(G1337_hookKillerSounds)
+end
+
+--// Run once folder is available, retry until it exists //
+task.spawn(function()
+    local kf
+    for _ = 1, 60 do
+        kf = workspace:FindFirstChild("Players") and workspace.Players:FindFirstChild("Killers")
+        if kf then break end
+        task.wait(1)
+    end
+    if kf then G1337_hookAllKillers() end
+end)
 
 --// VEERONICA AUTO TRICK (from DoomSaken) //
 
@@ -5203,7 +5311,7 @@ AddToggle(TabKiller, "DashTurn", "Dash Turn Fix (c00lkidd)", false, Feature.SetD
 
 
 AddSection(TabKiller, "Veeronica (Killer Side)")
-AddToggle(TabKiller, "AutoTrickKiller", "Auto Trick (Veeronica Killer)", false, Feature.SetAutoTrick)
+
 
 AddSection(TabKiller, "Azure QTE (Killer)")
 AddToggle(TabKiller, "AutoDisarmKiller", "Auto Disarm Azure QTE", false, SetAutoDisarm)
