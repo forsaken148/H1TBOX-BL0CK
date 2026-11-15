@@ -3627,14 +3627,31 @@ local function StartFourthButton()
         local newVal = not State.AutoBlock
         State.AutoBlock = newVal
         SetAutoBlock(newVal)
-        --// Sync the WindUI toggle element so it matches the button state //
+        --// Sync the tab toggle element so it reflects the button state //
         pcall(function()
             local reg = Registry["AutoBlock"]
             if reg and reg.Element and typeof(reg.Element.Set) == "function" then
                 reg.Element:Set(newVal)
             end
         end)
+        --// Apply tint immediately: green = on, red = off //
         if FourthBlock.applyTint then FourthBlock.applyTint() end
+        --// If turned off via button click, re-apply red after a frame in case StopFourthButton runs //
+        if not newVal then
+            task.defer(function()
+                if FourthBlock.instance and FourthBlock.instance.Parent then
+                    local b = FourthBlock.instance
+                    local redCol = Color3.fromRGB(255, 0, 0)
+                    pcall(function()
+                        if b:IsA("ImageButton") or b:IsA("ImageLabel") then b.ImageColor3 = redCol end
+                        for _, d in ipairs(b:GetDescendants()) do
+                            if d:IsA("ImageLabel") or d:IsA("ImageButton") then d.ImageColor3 = redCol
+                            elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then d.BackgroundColor3 = redCol end
+                        end
+                    end)
+                end
+            end)
+        end
         Notify("Auto Block", newVal and "Auto Block ON" or "Auto Block OFF", 2)
     end
 
@@ -4334,9 +4351,7 @@ getgenv().AutoPunch   = getgenv().AutoPunch   or { Enabled = false, Range = 50, 
 G1337.spheres, G1337.boxes = {}, {}
 G1337.inSphere, G1337.inBox, G1337.hasLos = {}, {}, {}
 G1337.lastSoundTime, G1337.advicePart, G1337.pulling = {}, nil, false
-G1337.justBlocked = false          --// true for one punch window after a block fires //
-G1337.lastBlockTime = 0            --// timestamp of last block so punch window expires //
-G1337.PUNCH_WINDOW = 0.6           --// seconds after a block fires that auto punch is allowed //
+
 G1337.CurrentConn, G1337.CurrentTarget = nil, nil
 G1337.PunchSphere = nil
 G1337.dashing = false
@@ -4392,23 +4407,40 @@ function G1337.show1x1Advice(root)
     task.delay(0.5, function() if G1337.advicePart then G1337.advicePart:Destroy() G1337.advicePart = nil end end)
 end
 function G1337.doHDPull(targetPos)
-    if G1337.pulling or not G1337.canUseBlock() then return end
+    if G1337.pulling then return end
     G1337.pulling = true
-    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then G1337.pulling = false return end
-    local bv = Instance.new("BodyVelocity")
-    bv.MaxForce = Vector3.new(40000, 0, 40000)
-    bv.Velocity = Vector3.zero
-    bv.Parent = hrp
-    local conn = RunService.Heartbeat:Connect(function()
-        if not bv.Parent then conn:Disconnect() G1337.pulling = false return end
+    local char = LocalPlayer.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildWhichIsA("Humanoid")
+    if not hrp or not hum then G1337.pulling = false return end
+    local savedSpeed = hum.WalkSpeed
+    pcall(function() hum.WalkSpeed = G1337.settings.hdSpeed * 5 end)
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        if not hrp or not hum or not hum.Parent then
+            if conn then conn:Disconnect() end
+            G1337.pulling = false
+            return
+        end
         local vec = targetPos - hrp.Position
-        if vec.Magnitude < 5 then bv:Destroy() conn:Disconnect() G1337.pulling = false return end
-        bv.Velocity = vec.Unit * (G1337.settings.hdSpeed * 20)
+        local flat = Vector3.new(vec.X, 0, vec.Z)
+        if flat.Magnitude < 4 then
+            hum:Move(Vector3.zero, false)
+            pcall(function() hum.WalkSpeed = savedSpeed end)
+            if conn then conn:Disconnect() end
+            G1337.pulling = false
+            return
+        end
+        hum:Move(flat.Unit, false)
     end)
     task.delay(0.5, function()
-        if bv and bv.Parent then bv:Destroy() end
         if conn then conn:Disconnect() end
+        pcall(function()
+            if hum and hum.Parent then
+                hum:Move(Vector3.zero, false)
+                hum.WalkSpeed = savedSpeed
+            end
+        end)
         G1337.pulling = false
     end)
 end
@@ -4564,33 +4596,7 @@ function G1337.Step()
     G1337.updateESP()
     G1337.UpdatePunchESP()
     if not G1337.killersFolder then return end
-    if getgenv().AutoPunch.Enabled then
-        --// Only punch if auto block just fired a block within the punch window //
-        if G1337.justBlocked and (os.clock() - G1337.lastBlockTime) <= G1337.PUNCH_WINDOW then
-            G1337.justBlocked = false  --// consume the flag — one punch per block //
-            local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local charges = LocalPlayer.PlayerGui:FindFirstChild("MainUI")
-                    and LocalPlayer.PlayerGui.MainUI:FindFirstChild("AbilityContainer")
-                    and LocalPlayer.PlayerGui.MainUI.AbilityContainer:FindFirstChild("Punch")
-                    and LocalPlayer.PlayerGui.MainUI.AbilityContainer.Punch:FindFirstChild("Charges")
-                if charges and charges.Text ~= "0" then
-                    for _, name in ipairs(G1337.killersList) do
-                        local killer = G1337.killersFolder:FindFirstChild(name)
-                        local khrp = killer and killer:FindFirstChild("HumanoidRootPart")
-                        if khrp and (khrp.Position - hrp.Position).Magnitude <= getgenv().AutoPunch.Range then
-                            G1337.remote:FireServer("UseActorAbility", {"Punch"})
-                            if getgenv().AutoPunch.TrueDash then G1337.TrueDash() end
-                            break
-                        end
-                    end
-                end
-            end
-        elseif G1337.justBlocked and (os.clock() - G1337.lastBlockTime) > G1337.PUNCH_WINDOW then
-            --// window expired, clear the flag //
-            G1337.justBlocked = false
-        end
-    end
+    --// Auto punch handled by original TimesHit watcher (see CharacterCallbacks) //
     if not (G1337.settings.autoblock or G1337.settings.hd) or not G1337.canUseBlock() then return end
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
     local myPos = LocalPlayer.Character.HumanoidRootPart.Position
@@ -4622,8 +4628,6 @@ function G1337.Step()
                                             task.wait(0.65 + (G1337.settings.reactTime or 0.01))
                                             if G1337.settings.autoblock and G1337.canUseBlock() then
                                                 G1337.remote:FireServer("UseActorAbility", {"Block"})
-                                                G1337.justBlocked = true
-                                                G1337.lastBlockTime = os.clock()
                                             end
                                             if G1337.settings.hd and G1337.canUseBlock() then G1337.doHDPull(root.Position) end
                                         end)
@@ -4636,8 +4640,6 @@ function G1337.Step()
                                         task.wait(G1337.settings.reactTime or 0.01)
                                         if G1337.settings.autoblock and G1337.canUseBlock() then
                                             G1337.remote:FireServer("UseActorAbility", {"Block"})
-                                            G1337.justBlocked = true
-                                            G1337.lastBlockTime = os.clock()
                                         end
                                         if G1337.settings.hd and G1337.canUseBlock() then G1337.doHDPull(root.Position) end
                                     end)
@@ -4938,7 +4940,37 @@ local TabExtra     = Window:Tab({ Title = "Extra",      Icon = "zap" })
 AddSection(TabAutoBlock, "Original Auto Block")
 AddToggle(TabAutoBlock, "AutoBlock", "Auto Block", false, function(v)
     SetAutoBlock(v)
-    if v then StartFourthButton() else StopFourthButton() end
+    if v then
+        StartFourthButton()
+        --// tint green once button is live //
+        task.defer(function()
+            if FourthBlock and FourthBlock.applyTint then FourthBlock.applyTint() end
+        end)
+    else
+        --// tint red first so button shows as off, then stop //
+        if FourthBlock and FourthBlock.applyTint then
+            pcall(FourthBlock.applyTint)
+        end
+        --// Keep the button visible but visually off (red); only fully stop after a frame //
+        task.defer(function()
+            StopFourthButton()
+            --// If the button instance still exists after stop, force red tint //
+            if FourthBlock and FourthBlock.instance and FourthBlock.instance.Parent then
+                local b = FourthBlock.instance
+                local redCol = Color3.fromRGB(255, 0, 0)
+                pcall(function()
+                    if b:IsA("ImageButton") or b:IsA("ImageLabel") then b.ImageColor3 = redCol end
+                    for _, d in ipairs(b:GetDescendants()) do
+                        if d:IsA("ImageLabel") or d:IsA("ImageButton") then
+                            d.ImageColor3 = redCol
+                        elseif d:IsA("Frame") and d.BackgroundTransparency < 1 then
+                            d.BackgroundColor3 = redCol
+                        end
+                    end
+                end)
+            end
+        end)
+    end
 end)
 AddToggle(TabAutoBlock, "StrictVisualCheck", "Strict Visual Check (Beam)", false)
 AddToggle(TabAutoBlock, "HitboxDrag",        "Hitbox Drag",                false)
@@ -4988,99 +5020,6 @@ AddSection(TabVeeronica, "Veeronica Scripts")
 AddToggle(TabVeeronica, "VR_AutoTrick", "Auto Trick", false, function(v)
     VR.enabled = v
     if v then VR.startManager() else VR.stopManager() end
-end)
-AddButton(TabVeeronica, "Skate Without Graffiti", function()
-    task.spawn(function()
-        --// Step 1: require the Veeronica Behavior module //
-        local ok, Behavior = pcall(function()
-            return require(ReplicatedStorage:WaitForChild("Assets",5)
-                :WaitForChild("Survivors",5)
-                :WaitForChild("Veeronica",5)
-                :WaitForChild("Behavior",5))
-        end)
-        if not ok or type(Behavior) ~= "table" then
-            Notify("Skate", "Behavior module not found", 4)
-            return
-        end
-
-        local patched = false
-
-        --// Step 2: scan upvalues of every function in the module for a graffiti/item check //
-        --// The check usually reads an inventory/backpack for a GraffitiCan or SprayCan item. //
-        --// We replace any function whose name or upvalue reveals it's a "has item" gate.    //
-        local function tryPatchFunction(fn)
-            if type(fn) ~= "function" then return false end
-            local ok2, n = pcall(debug.info, fn, "u")
-            if not ok2 then return false end
-            for i = 1, (n or 0) do
-                local uname, uval = debug.getupvalue(fn, i)
-                if type(uname) == "string" then
-                    local lname = uname:lower()
-                    -- target names the game uses for the graffiti gate
-                    if lname:find("graffiti") or lname:find("sprayCan") or lname:find("sprayer")
-                       or lname:find("hasitem") or lname:find("canski") or lname:find("sk8gate")
-                       or lname:find("skategate") then
-                        if type(uval) == "boolean" then
-                            pcall(debug.setupvalue, fn, i, true)
-                            patched = true
-                        elseif type(uval) == "function" then
-                            -- replace the gate function itself with one that always returns true
-                            pcall(debug.setupvalue, fn, i, function(...) return true end)
-                            patched = true
-                        end
-                    end
-                end
-            end
-            return patched
-        end
-
-        for key, val in pairs(Behavior) do
-            if type(val) == "function" then
-                tryPatchFunction(val)
-            elseif type(val) == "table" then
-                for _, fn in pairs(val) do
-                    if type(fn) == "function" then tryPatchFunction(fn) end
-                end
-            end
-        end
-
-        --// Step 3: hook-based fallback — use hookfunction on any exposed CanSkate/HasGraffiti method //
-        local hookTargets = {
-            "CanSkate", "HasGraffiti", "HasSprayer", "HasItem",
-            "CheckGraffiti", "CheckSprayer", "GetSkateAbility", "isAllowed"
-        }
-        for _, name in ipairs(hookTargets) do
-            if type(Behavior[name]) == "function" then
-                local orig = Behavior[name]
-                local ok3 = pcall(hookfunction, orig, function(...) return true end)
-                if ok3 then patched = true end
-            end
-        end
-
-        --// Step 4: spoof graffiti item in backpack so the server-side check passes //
-        --// The game checks LocalPlayer.Backpack for a Tool named "GraffitiCan" or similar //
-        local spoofed = false
-        local graffitiNames = {"GraffitiCan", "SprayCan", "Graffiti", "Sprayer", "Sk8Tag"}
-        local backpack = LocalPlayer:FindFirstChild("Backpack")
-        if backpack then
-            for _, gname in ipairs(graffitiNames) do
-                if not backpack:FindFirstChild(gname) then
-                    local dummy = Instance.new("Tool")
-                    dummy.Name = gname
-                    dummy.RequiresHandle = false
-                    dummy.Parent = backpack
-                    spoofed = true
-                    task.delay(30, function() if dummy and dummy.Parent then dummy:Destroy() end end)
-                end
-            end
-        end
-
-        if patched or spoofed then
-            Notify("Skate", "Graffiti check bypassed — you can now skate!", 4)
-        else
-            Notify("Skate", "Bypass attempted — if skate still fails, equip graffiti manually", 4)
-        end
-    end)
 end)
 AddButton(TabVeeronica, "Skate Controller", function()
     loadstring(game:HttpGet("https://pastebin.com/raw/MzKS5uvm"))()
@@ -5261,7 +5200,7 @@ SA.AddUI(TabKiller, SA.Nova, "Nova", "Nova")
 
 AddSection(TabKiller, "c00lkidd")
 AddToggle(TabKiller, "DashTurn", "Dash Turn Fix (c00lkidd)", false, Feature.SetDashTurn)
-AddToggle(TabKiller, "ChanceCoinFlipKiller", "Auto Coin Flip (c00lkidd)", false, Feature.SetChanceCoinFlip)
+
 
 AddSection(TabKiller, "Veeronica (Killer Side)")
 AddToggle(TabKiller, "AutoTrickKiller", "Auto Trick (Veeronica Killer)", false, Feature.SetAutoTrick)
