@@ -427,16 +427,14 @@ local _cacheFile = "FlexSaken_WindUI.lua"
 local _uiUrls = {
     "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
     "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua",
-    "https://raw.githubusercontent.com/Footagesus/WindUI/master/dist/main.lua",
-    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
+    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
 }
 --// Try loading from disk cache first (avoids network entirely on re-runs) //
 local _cached = pcall(function()
     if isfile and isfile(_cacheFile) then
         local src = readfile(_cacheFile)
         if src and #src > 500 then
-            local chunk = loadstring(src)
-            local lib = chunk and chunk()
+            local lib = loadstring(src)()
             if lib then WindUI = lib end
         end
     end
@@ -449,9 +447,7 @@ if not WindUI then
             if not src or #src < 500 then error("empty response") end
             --// Save to disk for next run //
             pcall(function() if writefile then writefile(_cacheFile, src) end end)
-            local chunk = loadstring(src)
-            if not chunk then error("loadstring returned nil") end
-            return chunk()
+            return loadstring(src)()
         end)
         if ok and result then WindUI = result; break end
         task.wait(1)
@@ -467,9 +463,7 @@ if not WindUI then
                 local src = game:HttpGet(url, true)
                 if not src or #src < 500 then error("empty response") end
                 pcall(function() if writefile then writefile(_cacheFile, src) end end)
-                local chunk = loadstring(src)
-                if not chunk then error("loadstring returned nil") end
-                return chunk()
+                return loadstring(src)()
             end)
             if ok and result then WindUI = result; break end
         end
@@ -516,7 +510,7 @@ local ThemeAdded = pcall(function()
     })
 end)
 local TouchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local WindowOptions = {
+local WindowOptions = ({
     Title       = "Flex Saken",
     Icon        = LogoId,
     Author      = "By Ethan and Luna",
@@ -526,7 +520,7 @@ local WindowOptions = {
     Theme       = ThemeAdded and "Crimson" or "Dark",
     SideBarWidth= 190,
     HasOutline  = true,
-}
+})
 local Window
 do
     local Created, Result = pcall(function() return WindUI:CreateWindow(WindowOptions) end)
@@ -835,7 +829,7 @@ function SA.Create(Id, DefaultTeam, GateName)
             task.spawn(function()
                 local Target = GetSharedRF(10)
                 if not self.Enabled then return end
-                if not Target then return end
+                if not Target thenreturn end
                 rfDispatch:Install(Target)
                 rfDispatch:Register(Id, function(RequestName, ...) return self:Hook(RequestName, ...) end)
             end)
@@ -1125,7 +1119,7 @@ local function GetSprinting()
 end
 local function SetInfiniteStamina(Enabled)
     local Sprinting = GetSprinting()
-    if not Sprinting then return end
+    if not Sprinting thenreturn end
     if not SprintingHooked and typeof(Sprinting.Init) == "function" then
         SprintingHooked = true; local OldInit = Sprinting.Init
         Sprinting.Init = function(...)
@@ -2033,7 +2027,7 @@ pcall(function()
     onIngameAdded(function()
         task.wait(1)
         bindMobs()
-        findPizza(); findZombies(); findPuddles()
+        findPizza() findZombies() findPuddles()
     end)
     local mainSection
     pcall(function() mainSection = tabESP:Section({ Title = "Main Settings", Opened = true }) end)
@@ -2105,10 +2099,10 @@ pcall(function()
             if Window.Flags.espPizza ~= nil then mobOpts.pizza = Window.Flags.espPizza end
             if Window.Flags.espZombie ~= nil then mobOpts.zombie = Window.Flags.espZombie end
             if Window.Flags.espPuddle ~= nil then mobOpts.puddle = Window.Flags.espPuddle end
-            if type(Window.Flags.espMinionTrans) == "number" then mobOpts.alpha = Window.Flags.espMinionTrans; syncMobAlpha() end
+            if type(Window.Flags.espMinionTrans) == "number" then mobOpts.alpha = Window.Flags.espMinionTrans syncMobAlpha() end
         end,
     }
-    if esp.enabled then task.wait(2); startESP() end
+    if esp.enabled then task.wait(2) startESP() end
     --// Candy ESP (c00lkidd candy) - original by luna <3 //
     do
         local Candy = { Enabled = false, Tracked = {}, Thread = nil, AddedConnection = nil }
@@ -2291,7 +2285,7 @@ pcall(function()
         pcall(function() if secGear then secGear:Toggle({ Title = "Gear ESP", Type = "Checkbox", Flag = "espGear", Default = false,
             Callback = function(on) if on then startGearESP() else stopGearESP() end end }) end end)
         pcall(function() if secGear then secGear:Button({ Title = "Force Rescan", Callback = function()
-            if gearESP.enabled then gearCleanup(); checkGear() end
+            if gearESP.enabled then gearCleanup() checkGear() end
         end }) end end)
     end
 end)
@@ -2771,7 +2765,7 @@ Risky("DashTurn, AutoBreakFree, AutoPullRope, AzureQte, AutoTrick, ShiftLock, Sk
     Feature.SetAzureQte = function(Enabled)
         if Enabled then
             if QteEnabled then return end
-            if typeof(debug.getupvalues) ~= "function" or typeof(debug.setupvalue) ~= "function" then return end
+            if typeof(debug.getupvalues) ~= "function" or typeof(debug.setupvalue) ~= "function" thenreturn end
             QteEnabled = true; local Module = GetQteModule(); local Loaded, Behavior = pcall(function() return Module and require(Module) end)
             if not Loaded or type(Behavior) ~= "table" or not Behavior.new then QteEnabled = false;return end
             local function PickZone(_, _, Completed) if type(Completed) == "table" then for Index = 1, 3 do if not Completed[Index] then return Index end end end; return 1 end
@@ -3063,12 +3057,12 @@ Risky("Music", function()
     end
     Feature.PreloadMusic = function()
         task.spawn(function()
-            if not FileSupport then return end
+            if not FileSupport thenreturn end
             for _, Name in Feature.MusicNames do FetchAsync(Name); task.wait(0.05) end;        end)
     end
     Feature.StopPreview = function() if Music.Preview then Music.Preview:Stop(); Music.Preview:Destroy(); Music.Preview = nil;    Feature.StartPreview = function()
         task.spawn(function()
-            local Asset = Fetch(State.LmsTrack); if not Asset then return end
+            local Asset = Fetch(State.LmsTrack); if not Asset thenreturn end
             if Music.Preview then Music.Preview:Stop(); Music.Preview:Destroy() end
             local Sound = Instance.new("Sound"); Sound.Name = "FlexSakenPreview"; Sound.SoundId = Asset; Sound.Volume = 1; Sound.Parent = SoundService; Sound:Play(); Music.Preview = Sound;        end)
     end
@@ -3548,9 +3542,18 @@ local function StartFourthButtonAlt()
         toggleLastTick = now
         local newVal = not G1337.settings.autoblock
         G1337.settings.autoblock = newVal
-        --// Sync the WindUI toggle so the tab reflects real state //
+        --// Sync G1337 WindUI toggle //
         pcall(function()
             local reg = Registry["G1337_AutoBlock"]
+            if reg and reg.Element and typeof(reg.Element.Set) == "function" then
+                reg.Element:Set(newVal)
+            end
+        end)
+        --// Also sync original AutoBlock toggle + logic //
+        State.AutoBlock = newVal
+        SetAutoBlock(newVal)
+        pcall(function()
+            local reg = Registry["AutoBlock"]
             if reg and reg.Element and typeof(reg.Element.Set) == "function" then
                 reg.Element:Set(newVal)
             end
@@ -4852,15 +4855,31 @@ AddToggle(TabAutoBlock, "G1337_InGameBtn", "In-Game Block Button (Alt)", false, 
     if v then
         StartFourthButtonAlt()
         G1337.settings.autoblock = true
+        --// Sync G1337 toggle //
         pcall(function()
             local reg = Registry["G1337_AutoBlock"]
+            if reg and reg.Element and typeof(reg.Element.Set) == "function" then reg.Element:Set(true) end
+        end)
+        --// Also turn on original AutoBlock toggle //
+        State.AutoBlock = true
+        SetAutoBlock(true)
+        pcall(function()
+            local reg = Registry["AutoBlock"]
             if reg and reg.Element and typeof(reg.Element.Set) == "function" then reg.Element:Set(true) end
         end)
     else
         StopFourthButtonAlt()
         G1337.settings.autoblock = false
+        --// Sync G1337 toggle //
         pcall(function()
             local reg = Registry["G1337_AutoBlock"]
+            if reg and reg.Element and typeof(reg.Element.Set) == "function" then reg.Element:Set(false) end
+        end)
+        --// Also turn off original AutoBlock toggle //
+        State.AutoBlock = false
+        SetAutoBlock(false)
+        pcall(function()
+            local reg = Registry["AutoBlock"]
             if reg and reg.Element and typeof(reg.Element.Set) == "function" then reg.Element:Set(false) end
         end)
     end
@@ -4900,62 +4919,6 @@ AddSection(TabVeeronica, "Veeronica Scripts")
 AddToggle(TabVeeronica, "VR_AutoTrick", "Auto Trick", false, function(v)
     VR.enabled = v
     if v then VR.startManager() else VR.stopManager() end
-end)
-AddButton(TabVeeronica, "Skate Without Graffiti", function()
-    task.spawn(function()
-        local char = LocalPlayer.Character
-        if not char then        local spoofed = false
-        --// Method 1: spoof graffiti value into SpeedMultipliers (same container
-        --// the server uses for GuestBlocking, Sk8Gate checks etc.) //
-        local sm = char:FindFirstChild("SpeedMultipliers")
-        if sm then
-            local graffitiKeys = {"GraffitiCan", "SprayCan", "Sk8Tag", "HasGraffiti", "CanSk8"}
-            for _, key in ipairs(graffitiKeys) do
-                if not sm:FindFirstChild(key) then
-                    local v = Instance.new("BoolValue")
-                    v.Name  = key
-                    v.Value = true
-                    v.Parent = sm
-                    spoofed = true
-                end
-            end
-        end
-        --// Method 2: set the character attribute the server reads directly //
-        local attrKeys = {"HasGraffiti", "CanSk8", "GraffitiCan", "Sk8Unlocked"}
-        for _, key in ipairs(attrKeys) do
-            pcall(function() char:SetAttribute(key, true) end)
-        end
-        spoofed = true
-        --// Method 3: spoof a Tool into Backpack so any inventory check passes //
-        local bp = LocalPlayer:FindFirstChild("Backpack")
-        if bp then
-            local toolNames = {"GraffitiCan", "SprayCan", "Graffiti"}
-            for _, tname in ipairs(toolNames) do
-                if not bp:FindFirstChild(tname) and not (char and char:FindFirstChild(tname)) then
-                    local dummy = Instance.new("Tool")
-                    dummy.Name = tname
-                    dummy.RequiresHandle = false
-                    dummy.Parent = bp
-                    --// remove after 60s so inventory stays clean //
-                    task.delay(60, function() if dummy and dummy.Parent then dummy:Destroy() end end)
-                    spoofed = true
-                end
-            end
-        end
-        task.wait(0.1)
-        --// Now fire Sk8 //
-        local fired = false
-        pcall(function() Remote:FireServer("UseActorAbility", {"Sk8"}); fired = true end)
-        if not fired then
-            pcall(function()
-                ReplicatedStorage.Modules.Network.RemoteEvent:FireServer("UseActorAbility", {"Sk8"})
-                fired = true
-            end)
-        end
-        if fired then
-        else
-        end
-    end)
 end)
 AddButton(TabVeeronica, "Skate Controller", function()
     loadstring(game:HttpGet("https://pastebin.com/raw/MzKS5uvm"))()
@@ -5092,6 +5055,7 @@ AddSlider(TabSurvivor, "ChancePrediction", "Look Prediction (studs)", 0, 20, 4, 
 AddSlider(TabSurvivor, "ChanceLead", "Lead Time (s)", 0, 1.5, 0.35, 0.05)
 AddToggle(TabSurvivor, "ChanceAntiBait", "Anti-Bait Speed Cap", true)
 AddToggle(TabSurvivor, "ChanceCoinFlip", "Auto Coin Flip (away from killers)", false, Feature.SetChanceCoinFlip)
+AddToggle(TabSurvivor, "ChanceCoinFlipKiller", "Auto Coin Flip", false, Feature.SetChanceCoinFlip)
 SA.AddUI(TabSurvivor, SA.Dusekkar, "Dusekkar", "Dusekkar")
 --// Jane Doe //
 AddSection(TabSurvivor, "Jane Doe — Crystal Auto-Fire")
@@ -5118,7 +5082,7 @@ AddSection(TabKiller, "Nova Silent Aim")
 SA.AddUI(TabKiller, SA.Nova, "Nova", "Nova")
 AddSection(TabKiller, "c00lkidd")
 AddToggle(TabKiller, "DashTurn", "Dash Turn Fix (c00lkidd)", false, Feature.SetDashTurn)
-AddToggle(TabKiller, "ChanceCoinFlipKiller", "Auto Coin Flip (c00lkidd)", false, Feature.SetChanceCoinFlip)
+
 AddSection(TabKiller, "Veeronica (Killer Side)")
 AddToggle(TabKiller, "AutoTrickKiller", "Auto Trick (Veeronica Killer)", false, Feature.SetAutoTrick)
 AddSection(TabKiller, "Azure QTE (Killer)")
@@ -5515,8 +5479,7 @@ AddSection(TabGodMode, "God Mode")
 AddButton(TabGodMode, "Activate God Mode", function()
     task.spawn(function()
         local chac = LocalPlayer.Character
-        if not chac then return end
-        local p = Instance.new("Part")
+        if not chac then        local p = Instance.new("Part")
         p.Name = "test"
         p.Size = Vector3.new(1, 1, 1)
         p.Transparency = 1
