@@ -510,7 +510,7 @@ local ThemeAdded = pcall(function()
     })
 end)
 local TouchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local WindowOptions = ({
+local WindowOptions = {
     Title       = "Flex Saken",
     Icon        = LogoId,
     Author      = "By Ethan and Luna",
@@ -520,7 +520,7 @@ local WindowOptions = ({
     Theme       = ThemeAdded and "Crimson" or "Dark",
     SideBarWidth= 190,
     HasOutline  = true,
-})
+}
 local Window
 do
     local Created, Result = pcall(function() return WindUI:CreateWindow(WindowOptions) end)
@@ -829,7 +829,7 @@ function SA.Create(Id, DefaultTeam, GateName)
             task.spawn(function()
                 local Target = GetSharedRF(10)
                 if not self.Enabled then return end
-                if not Target thenreturn end
+                if not Target then return end
                 rfDispatch:Install(Target)
                 rfDispatch:Register(Id, function(RequestName, ...) return self:Hook(RequestName, ...) end)
             end)
@@ -1119,7 +1119,7 @@ local function GetSprinting()
 end
 local function SetInfiniteStamina(Enabled)
     local Sprinting = GetSprinting()
-    if not Sprinting thenreturn end
+    if not Sprinting then return end
     if not SprintingHooked and typeof(Sprinting.Init) == "function" then
         SprintingHooked = true; local OldInit = Sprinting.Init
         Sprinting.Init = function(...)
@@ -2027,7 +2027,7 @@ pcall(function()
     onIngameAdded(function()
         task.wait(1)
         bindMobs()
-        findPizza() findZombies() findPuddles()
+        findPizza(); findZombies(); findPuddles()
     end)
     local mainSection
     pcall(function() mainSection = tabESP:Section({ Title = "Main Settings", Opened = true }) end)
@@ -2099,10 +2099,10 @@ pcall(function()
             if Window.Flags.espPizza ~= nil then mobOpts.pizza = Window.Flags.espPizza end
             if Window.Flags.espZombie ~= nil then mobOpts.zombie = Window.Flags.espZombie end
             if Window.Flags.espPuddle ~= nil then mobOpts.puddle = Window.Flags.espPuddle end
-            if type(Window.Flags.espMinionTrans) == "number" then mobOpts.alpha = Window.Flags.espMinionTrans syncMobAlpha() end
+            if type(Window.Flags.espMinionTrans) == "number" then mobOpts.alpha = Window.Flags.espMinionTrans; syncMobAlpha() end
         end,
     }
-    if esp.enabled then task.wait(2) startESP() end
+    if esp.enabled then task.wait(2); startESP() end
     --// Candy ESP (c00lkidd candy) - original by luna <3 //
     do
         local Candy = { Enabled = false, Tracked = {}, Thread = nil, AddedConnection = nil }
@@ -2285,7 +2285,7 @@ pcall(function()
         pcall(function() if secGear then secGear:Toggle({ Title = "Gear ESP", Type = "Checkbox", Flag = "espGear", Default = false,
             Callback = function(on) if on then startGearESP() else stopGearESP() end end }) end end)
         pcall(function() if secGear then secGear:Button({ Title = "Force Rescan", Callback = function()
-            if gearESP.enabled then gearCleanup() checkGear() end
+            if gearESP.enabled then gearCleanup(); checkGear() end
         end }) end end)
     end
 end)
@@ -2765,7 +2765,7 @@ Risky("DashTurn, AutoBreakFree, AutoPullRope, AzureQte, AutoTrick, ShiftLock, Sk
     Feature.SetAzureQte = function(Enabled)
         if Enabled then
             if QteEnabled then return end
-            if typeof(debug.getupvalues) ~= "function" or typeof(debug.setupvalue) ~= "function" thenreturn end
+            if typeof(debug.getupvalues) ~= "function" or typeof(debug.setupvalue) ~= "function" then return end
             QteEnabled = true; local Module = GetQteModule(); local Loaded, Behavior = pcall(function() return Module and require(Module) end)
             if not Loaded or type(Behavior) ~= "table" or not Behavior.new then QteEnabled = false;return end
             local function PickZone(_, _, Completed) if type(Completed) == "table" then for Index = 1, 3 do if not Completed[Index] then return Index end end end; return 1 end
@@ -3057,12 +3057,12 @@ Risky("Music", function()
     end
     Feature.PreloadMusic = function()
         task.spawn(function()
-            if not FileSupport thenreturn end
+            if not FileSupport then return end
             for _, Name in Feature.MusicNames do FetchAsync(Name); task.wait(0.05) end;        end)
     end
     Feature.StopPreview = function() if Music.Preview then Music.Preview:Stop(); Music.Preview:Destroy(); Music.Preview = nil;    Feature.StartPreview = function()
         task.spawn(function()
-            local Asset = Fetch(State.LmsTrack); if not Asset thenreturn end
+            local Asset = Fetch(State.LmsTrack); if not Asset then return end
             if Music.Preview then Music.Preview:Stop(); Music.Preview:Destroy() end
             local Sound = Instance.new("Sound"); Sound.Name = "FlexSakenPreview"; Sound.SoundId = Asset; Sound.Volume = 1; Sound.Parent = SoundService; Sound:Play(); Music.Preview = Sound;        end)
     end
@@ -5509,7 +5509,8 @@ AddSection(TabGodMode, "God Mode")
 AddButton(TabGodMode, "Activate God Mode", function()
     task.spawn(function()
         local chac = LocalPlayer.Character
-        if not chac then        local p = Instance.new("Part")
+        if not chac then return end
+        local p = Instance.new("Part")
         p.Name = "test"
         p.Size = Vector3.new(1, 1, 1)
         p.Transparency = 1
