@@ -475,47 +475,100 @@ local _uiUrls = {
     "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua",
     "https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua",
     "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+    "https://cdn.jsdelivr.net/gh/Footagesus/WindUI@main/dist/main.lua",
 }
 
---// Try loading from disk cache first (avoids network entirely on re-runs) //
-local _cached = pcall(function()
+local function _isValidWindUI(lib)
+    return type(lib) == "table" and (type(lib.CreateWindow) == "function" or type(lib.Window) == "function")
+end
+
+local function _tryLoadSource(src, save)
+    if not src or type(src) ~= "string" or #src < 1000 then
+        return nil, "empty or short source"
+    end
+    local chunk, err = loadstring(src)
+    if not chunk then
+        return nil, "loadstring: " .. tostring(err)
+    end
+    local ok, lib = pcall(chunk)
+    if not ok then
+        return nil, "execute: " .. tostring(lib)
+    end
+    if not _isValidWindUI(lib) then
+        return nil, "library missing CreateWindow"
+    end
+    if save and writefile then
+        pcall(writefile, _cacheFile, src)
+    end
+    return lib, nil
+end
+
+--// Try disk cache first; delete if invalid so we do not keep a bad cache //
+pcall(function()
     if isfile and isfile(_cacheFile) then
         local src = readfile(_cacheFile)
-        if src and #src > 500 then
-            local lib = loadstring(src)()
-            if lib then WindUI = lib end
+        local lib, err = _tryLoadSource(src, false)
+        if lib then
+            WindUI = lib
+        else
+            warn("[FlexSaken] WindUI cache invalid (" .. tostring(err) .. ") — deleting")
+            pcall(function() if deletefile then deletefile(_cacheFile) end end)
         end
     end
 end)
 
---// If cache missed, try each URL //
+local function _fetchUrl(url)
+    local src
+    local ok, res = pcall(function()
+        return game:HttpGet(url, true)
+    end)
+    if ok then src = res end
+    if (not src or #src < 1000) and typeof(http_request) == "function" then
+        local ok2, res2 = pcall(function()
+            local r = http_request({ Url = url, Method = "GET" })
+            return r and (r.Body or r.body)
+        end)
+        if ok2 then src = res2 end
+    end
+    return src
+end
+
+--// Network fetch with validation //
 if not WindUI then
     for _, url in ipairs(_uiUrls) do
-        local ok, result = pcall(function()
-            local src = game:HttpGet(url, true)
-            if not src or #src < 500 then error("empty response") end
-            --// Save to disk for next run //
-            pcall(function() if writefile then writefile(_cacheFile, src) end end)
-            return loadstring(src)()
+        local ok, libOrErr = pcall(function()
+            local src = _fetchUrl(url)
+            local lib, err = _tryLoadSource(src, true)
+            if not lib then error(err or "unknown") end
+            return lib
         end)
-        if ok and result then WindUI = result; break end
-        task.wait(1)
+        if ok and libOrErr then
+            WindUI = libOrErr
+            print("[FlexSaken] WindUI loaded from " .. url)
+            break
+        else
+            warn("[FlexSaken] WindUI fetch failed: " .. tostring(libOrErr))
+        end
+        task.wait(0.5)
     end
 end
 
---// If WindUI still not loaded, retry up to 3 more times before giving up //
+--// Retries if still missing //
 if not WindUI then
     for _retry = 1, 3 do
-        warn("[FlexSaken] WindUI load attempt " .. _retry .. " of 3 - retrying in 3s...")
-        task.wait(3)
+        warn("[FlexSaken] WindUI load attempt " .. _retry .. " of 3 — retrying...")
+        task.wait(2)
         for _, url in ipairs(_uiUrls) do
-            local ok, result = pcall(function()
-                local src = game:HttpGet(url, true)
-                if not src or #src < 500 then error("empty response") end
-                pcall(function() if writefile then writefile(_cacheFile, src) end end)
-                return loadstring(src)()
+            local ok, libOrErr = pcall(function()
+                local src = _fetchUrl(url)
+                local lib, err = _tryLoadSource(src, true)
+                if not lib then error(err or "unknown") end
+                return lib
             end)
-            if ok and result then WindUI = result; break end
+            if ok and libOrErr then
+                WindUI = libOrErr
+                break
+            end
         end
         if WindUI then break end
     end
@@ -523,7 +576,7 @@ end
 
 local UsingStub = false
 
---// Stub UI: accepts every call and does nothing, so features keep running when WindUI fails //
+--// Stub UI: features still run when WindUI fails //
 local function MakeStub()
     return setmetatable({}, {
         __index = function(_, Key)
@@ -539,11 +592,20 @@ local function MakeStubUI()
     rawset(UI, "Notify", function(_, Info)
         print("[FlexSaken] " .. tostring(Info and Info.Title) .. ": " .. tostring(Info and Info.Content))
     end)
+    rawset(UI, "CreateWindow", function()
+        return MakeStub()
+    end)
+    rawset(UI, "AddTheme", function() end)
+    rawset(UI, "SetTheme", function() end)
     return UI
 end
 
 if not WindUI then
-    flashError("WindUI failed to load - running without the menu. Saved settings still apply. Check your internet and HttpGet permissions.")
+    flashError("WindUI failed to load - running without the menu. Saved settings still apply. Check internet / HttpGet.")
+    WindUI = MakeStubUI()
+    UsingStub = true
+elseif not _isValidWindUI(WindUI) then
+    flashError("WindUI loaded but CreateWindow missing - using stub menu.")
     WindUI = MakeStubUI()
     UsingStub = true
 end
@@ -553,21 +615,33 @@ local DiscordLink= "https://discord.gg/rA3Vm8u9U"
 
 --// CRIMSON THEME //
 
---// Crimson theme applied after Window creation below //
+local ThemeAdded = pcall(function()
+    WindUI:AddTheme({
+        Name        = "Crimson",
+        Accent      = Color3.fromRGB(220, 20, 60),
+        Dialog      = Color3.fromRGB(18, 6, 8),
+        Outline     = Color3.fromRGB(255, 50, 80),
+        Text        = Color3.fromRGB(255, 220, 225),
+        Placeholder = Color3.fromRGB(180, 100, 110),
+        Background  = Color3.fromRGB(12, 4, 6),
+        Button      = Color3.fromRGB(140, 10, 30),
+        Icon        = Color3.fromRGB(255, 80, 100),
+    })
+end)
 
 local TouchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
-local WindowOptions = {
+local WindowOptions = ({
     Title       = "Flex Saken",
     Icon        = LogoId,
     Author      = "By Ethan and Luna",
     Folder      = "FlexSaken",
     Size        = TouchOnly and UDim2.fromOffset(500, 340) or UDim2.fromOffset(600, 460),
     Transparent = true,
-    Theme       = "Dark",
+    Theme       = ThemeAdded and "Crimson" or "Dark",
     SideBarWidth= 190,
     HasOutline  = true,
-}
+})
 
 local Window
 do
@@ -582,24 +656,7 @@ do
     end
 end
 
-local ThemeAdded = pcall(function()
-    WindUI:AddTheme({
-        Name        = "Crimson",
-        Accent      = Color3.fromRGB(220, 20, 60),
-        Dialog      = Color3.fromRGB(18, 6, 8),
-        Outline     = Color3.fromRGB(255, 50, 80),
-        Text        = Color3.fromRGB(255, 220, 225),
-        Placeholder = Color3.fromRGB(180, 100, 110),
-        Background  = Color3.fromRGB(12, 4, 6),
-        Button      = Color3.fromRGB(140, 10, 30),
-        Icon        = Color3.fromRGB(255, 80, 100),
-    })
-    WindUI:SetTheme("Crimson")
-    pcall(function() Window:SetTheme("Crimson") end)
-end)
-if not ThemeAdded then
-    pcall(function() WindUI:SetTheme("Dark") end)
-end
+pcall(function() WindUI:SetTheme("Crimson") end)
 pcall(function() Window:Tag({ Title = "V" .. Version, Color = Color3.fromRGB(220, 20, 60) }) end)
 
 --// OPEN BUTTON with crimson sparkle gradient //
@@ -665,7 +722,23 @@ if not TabESP then
 end
 print("[FlexSaken] Early tabs created")
 
---// tab watchdog removed: caused duplicate tabs that broke WindUI sidebar //
+task.spawn(function()
+    for i = 1, 10 do
+        task.wait(2)
+        pcall(function()
+            local titles = {
+                {"ESP","eye"},{"Auto Block","shield"},{"Veeronica","star"},{"Elliot","zap"},
+                {"Misc","settings"},{"Visual","sparkles"},{"Movement","arrow-up"},{"Survivor","user"},
+                {"Killer","skull"},{"Two Time","sword"},{"Extra","plus"},{"Shedletsky","swords"},
+                {"Freeze Hitbox","crosshair"},{"Info","info"},
+            }
+            for _, t in ipairs(titles) do
+                pcall(function() Window:Tab({ Title = t[1], Icon = t[2] }) end)
+            end
+        end)
+        print("[FlexSaken] tab watchdog tick", i)
+    end
+end)
 
 pcall(function()
     -- mark tabs so user sees something even before features finish
