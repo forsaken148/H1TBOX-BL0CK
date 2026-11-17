@@ -3,16 +3,9 @@
 --// Elliot, Veeronica, Auto Generator, Animations, Music, Chance, Nova, Dusekkar, Candy ESP, Jane Doe, Backstab, G1337 Auto Block //
 
 --// Wait for game to reach minimum distributed time, with a generous cap //
-local _waitStart = (os and os.clock and os.clock()) or 0
-do
-    local ok, dgt = pcall(function() return workspace.DistributedGameTime end)
-    local t0 = _waitStart
-    while ok and (dgt or 0) < 4 do
-        local now = (os and os.clock and os.clock()) or t0
-        if now - t0 >= 15 then break end
-        if task and task.wait then task.wait(0.5) else break end
-        ok, dgt = pcall(function() return workspace.DistributedGameTime end)
-    end
+local _waitStart = os.clock()
+while workspace.DistributedGameTime < 4 and os.clock() - _waitStart < 15 do
+    task.wait(0.5)
 end
 
 local CoreGui = game:GetService("CoreGui")
@@ -45,7 +38,7 @@ do
     local _gidStart = os.clock()
     while not (game.GameId == 6331902150 or game.GameId == 7464167604 or workspace:GetAttribute("ServerType")) do
         if os.clock() - _gidStart > 3 then
-            warn("[FlexSaken] Game ID check timed out - loading anyway (features may be limited)")
+            warn("[FlexSaken] Game ID check timed out — loading anyway (features may be limited)")
             break
         end
         task.wait(0.25)
@@ -396,7 +389,7 @@ local ModulesFolder   = ReplicatedStorage:FindFirstChild("Modules")
 local NetworkModule   = ModulesFolder and ModulesFolder:FindFirstChild("Network", true)
 local NetworkFolder   = NetworkModule and (NetworkModule:FindFirstChild("Network") or NetworkModule)
 local Remote          = NetworkFolder and NetworkFolder:FindFirstChildOfClass("RemoteEvent")
---// MapHolder and InGame: FindFirstChild only - never block script init for round folders //
+--// MapHolder and InGame: FindFirstChild only — never block script init for round folders //
 local MapHolder       = workspace:FindFirstChild("Map")
 local InGame          = MapHolder and MapHolder:FindFirstChild("Ingame")
 
@@ -506,7 +499,7 @@ end
 --// If WindUI still not loaded, retry up to 3 more times before giving up //
 if not WindUI then
     for _retry = 1, 3 do
-        warn("[FlexSaken] WindUI load attempt " .. _retry .. " of 3 - retrying in 3s...")
+        warn("[FlexSaken] WindUI load attempt " .. _retry .. " of 3 — retrying in 3s...")
         task.wait(3)
         for _, url in ipairs(_uiUrls) do
             local ok, result = pcall(function()
@@ -616,76 +609,6 @@ end)
 
 pcall(function() Window:SetToggleKey(Enum.KeyCode.RightShift) end)
 
---// EARLY TABS (always create so menu is never empty if later code errors) //
-local function SafeTab(opts)
-    local ok, tab = pcall(function() return Window:Tab(opts) end)
-    if ok and tab then return tab end
-    warn("[FlexSaken] Tab failed: " .. tostring(opts and opts.Title) .. " -> " .. tostring(tab))
-    -- no-op stub tab (never errors on :Section/:Toggle/:Slider/etc)
-    local stub = {}
-    local function noop()
-        return stub
-    end
-    setmetatable(stub, {
-        __index = function()
-            return noop
-        end,
-        __call = function()
-            return stub
-        end,
-    })
-    return stub
-end
-
-local TabAutoBlock = SafeTab({ Title = "Auto Block", Icon = "shield" })
-local TabVeeronica = SafeTab({ Title = "Veeronica",  Icon = "star" })
-local TabElliot    = SafeTab({ Title = "Elliot",     Icon = "zap" })
-local TabMisc      = SafeTab({ Title = "Misc",       Icon = "settings" })
-local TabVisual    = SafeTab({ Title = "Visual",     Icon = "sparkles" })
-local TabMovement  = SafeTab({ Title = "Movement",   Icon = "arrow-up" })
-local TabSurvivor  = SafeTab({ Title = "Survivor",   Icon = "user" })
-local TabKiller    = SafeTab({ Title = "Killer",     Icon = "skull" })
-local TabTwoTime   = SafeTab({ Title = "Two Time",   Icon = "sword" })
-local TabExtra     = SafeTab({ Title = "Extra",      Icon = "plus" })
--- TabShedletsky created early
--- TabFreezeHitbox created early
--- TabInfo created early
-
-local TabESP = nil
-pcall(function()
-    TabESP = Window:Tab({ Title = "ESP", Icon = "eye" })
-end)
-if not TabESP then
-    TabESP = SafeTab({ Title = "ESP", Icon = "eye" })
-end
-print("[FlexSaken] Early tabs created")
-
-task.spawn(function()
-    for i = 1, 10 do
-        task.wait(2)
-        pcall(function()
-            local titles = {
-                {"ESP","eye"},{"Auto Block","shield"},{"Veeronica","star"},{"Elliot","zap"},
-                {"Misc","settings"},{"Visual","sparkles"},{"Movement","arrow-up"},{"Survivor","user"},
-                {"Killer","skull"},{"Two Time","sword"},{"Extra","plus"},{"Shedletsky","swords"},
-                {"Freeze Hitbox","crosshair"},{"Info","info"},
-            }
-            for _, t in ipairs(titles) do
-                pcall(function() Window:Tab({ Title = t[1], Icon = t[2] }) end)
-            end
-        end)
-        print("[FlexSaken] tab watchdog tick", i)
-    end
-end)
-
-pcall(function()
-    -- mark tabs so user sees something even before features finish
-    if TabMisc and TabMisc.Section then
-        TabMisc:Section({ Title = "Loading features..." })
-    end
-end)
-
-
 --// HELPERS //
 
 local function Notify(Title, Content, Duration)
@@ -709,13 +632,9 @@ local function SafeCall(Name, Callback, ...)
     return Ok
 end
 
-local LoadFailures = {}
 local function Risky(Name, Body)
     local Ok, Err = pcall(Body)
-    if not Ok then
-        warn("[FlexSaken] " .. tostring(Name) .. " failed to load: " .. tostring(Err))
-        table.insert(LoadFailures, tostring(Name) .. ": " .. tostring(Err))
-    end
+    if not Ok then warn("[FlexSaken] " .. tostring(Name) .. " failed to load: " .. tostring(Err)) end
     return Ok
 end
 
@@ -819,10 +738,9 @@ local function IdSet(List)
 end
 
 local function FireAbility(Name)
-    if not Remote then pcall(RefreshFolders) end
     if not Remote then return end
-    pcall(function() Remote:FireServer("UseActorAbility", { Name }) end)
-    if not OfficialGame then pcall(function() Remote:FireServer("UseActorAbility", Name) end) end
+    Remote:FireServer("UseActorAbility", { Name })
+    if not OfficialGame then Remote:FireServer("UseActorAbility", Name) end
 end
 
 local function GetClosestKiller(Distance)
@@ -1358,9 +1276,7 @@ end
 --// Fixed minions: rebind and rescan every round //
 
 pcall(function()
-    local tabESP = TabESP or Window:Tab({ Title = "ESP", Icon = "eye" })
-    if TabESP and tabESP ~= TabESP then pcall(function() end) end
-    tabESP = TabESP or tabESP
+    local tabESP = Window:Tab({ Title = "ESP", Icon = "eye" })
     local lp = LocalPlayer
 
     local svc = {
@@ -3586,7 +3502,7 @@ Risky("GeneratorModules", function()
     end
 
     if not (FlowBoardModule and LockBoardModule and FlowInputModule and ConnectInputModule) then
-        warn("[FlexSaken] Generator solver modules not found - Auto Generator will be disabled")
+        warn("[FlexSaken] Generator solver modules not found — Auto Generator will be disabled")
     end
 end)
 
@@ -3702,7 +3618,7 @@ end
 local function installMinigameHooks()
     if MinigameSolver.Installed then return end
     if not (FlowBoardModule and LockBoardModule and FlowInputModule and ConnectInputModule) then
-        warn("[FlexSaken] Cannot install minigame hooks - required modules missing")
+        warn("[FlexSaken] Cannot install minigame hooks — required modules missing")
         return
     end
     MinigameSolver.Installed = true
@@ -3800,7 +3716,7 @@ local function installMinigameHooks()
                 pcall(function() callbacks.OnTurn(90) end)
                 task.wait(math.max(0, GenConfig.GearDelay or 0.03))
             end
-            --// Finished all turns - bump generation so we don't re-enter //
+            --// Finished all turns — bump generation so we don't re-enter //
             MinigameSolver.Generation += 1
         end)
         return object
@@ -4036,7 +3952,7 @@ local function StopFourthButton()
     FourthBlock.running = false
     for _, c in ipairs(FourthBlock.connections) do pcall(function() c:Disconnect() end) end
     FourthBlock.connections = {}
-    --// Keep the button visible - tint red to show it's off //
+    --// Keep the button visible — tint red to show it's off //
     local b = FourthBlock.instance
     if b and b.Parent then
         local redCol = Color3.fromRGB(255, 0, 0)
@@ -4051,11 +3967,11 @@ local function StopFourthButton()
             end
         end)
     end
-    --// Do NOT nil or destroy instance - button stays on screen //
+    --// Do NOT nil or destroy instance — button stays on screen //
     print("[FlexSaken] AutoBlockButton OFF")
 end
 
---// JANE DOE - Crystal / Aimbot / Axe Lock //
+--// JANE DOE — Crystal / Aimbot / Axe Lock //
 
 local JD = {
     Enabled = false, Aimbot = false, Axe = false,
@@ -4648,7 +4564,7 @@ function G1337.canUseBlock()
         if clip.Size == UDim2.new(1,0,1,0) then return true end
         --// Also accept if clip is >= 0.95 in Y (nearly full = ready) //
         if clip.Size.Y.Scale >= 0.95 then return true end
-        --// If clipping exists but is at 0,0 = fully on cooldown - block not ready //
+        --// If clipping exists but is at 0,0 = fully on cooldown — block not ready //
         if clip.Size.Y.Scale <= 0.01 then return false end
         --// Otherwise treat partial clip as ready (conservative fallback) //
         return true
@@ -4663,10 +4579,10 @@ function G1337.canUseBlock()
         if cd and type(cd.Value) == "number" then
             return cd.Value <= 0.05
         end
-        --// No cooldown child found - assume block is usable //
+        --// No cooldown child found — assume block is usable //
         return true
     end
-    --// Can't determine state at all - allow it and let server reject if needed //
+    --// Can't determine state at all — allow it and let server reject if needed //
     return true
 end
 function G1337.hasLineOfSight(targetRoot)
@@ -5020,10 +4936,7 @@ end)
 local VR = {}
 VR.behaviorFolder = nil
 pcall(function()
-    local a = ReplicatedStorage:FindFirstChild("Assets")
-    local s = a and a:FindFirstChild("Survivors")
-    local v = s and s:FindFirstChild("Veeronica")
-    VR.behaviorFolder = v and v:FindFirstChild("Behavior")
+    VR.behaviorFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Survivors"):WaitForChild("Veeronica"):WaitForChild("Behavior")
 end)
 VR.enabled = false
 VR.activeMonitors = {}
@@ -5213,8 +5126,8 @@ EL.frontOffset = 2
 EL.movementThreshold = 16
 EL.aimType = "HRP Aimbot"
 function EL.setupCharacter(char)
-    EL.Humanoid = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
-    EL.HRP = char:FindFirstChild("HumanoidRootPart") or char:WaitForChild("HumanoidRootPart", 5)
+    EL.Humanoid = char:WaitForChild("Humanoid")
+    EL.HRP = char:WaitForChild("HumanoidRootPart")
 end
 if LocalPlayer.Character then task.spawn(EL.setupCharacter, LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(EL.setupCharacter)
@@ -5270,7 +5183,6 @@ function EL.AimAt(targetHRP)
     end
 end
 
-
 --// TABS //
 
 local function UnloadScript()
@@ -5288,10 +5200,32 @@ local function UnloadScript()
     pcall(function() getgenv()._flexsakenESP = nil end)
 end
 
---// main tabs created early near Window (see above) //
+local function SafeTab(opts)
+    local ok, tab = pcall(function() return Window:Tab(opts) end)
+    if ok and tab then return tab end
+    warn("[FlexSaken] Tab failed: " .. tostring(opts and opts.Title) .. " -> " .. tostring(tab))
+    -- stub tab so AddSection/Toggle never nil-index
+    return setmetatable({}, {
+        __index = function()
+            return function() return setmetatable({}, { __index = function() return function() end end, __call = function() end }) end
+        end,
+        __call = function() end,
+    })
+end
+
+local TabAutoBlock = SafeTab({ Title = "Auto Block", Icon = "shield" })
+local TabVeeronica = SafeTab({ Title = "Veeronica",  Icon = "star" })
+local TabElliot    = SafeTab({ Title = "Elliot",     Icon = "zap" })
+local TabMisc      = SafeTab({ Title = "Misc",       Icon = "settings" })
+local TabVisual    = SafeTab({ Title = "Visual",     Icon = "sparkles" })
+local TabMovement  = SafeTab({ Title = "Movement",   Icon = "arrow-up" })
+local TabSurvivor  = SafeTab({ Title = "Survivor",   Icon = "user" })
+local TabKiller    = SafeTab({ Title = "Killer",     Icon = "skull" })
+local TabTwoTime   = SafeTab({ Title = "Two Time",   Icon = "sword" })
+local TabExtra     = SafeTab({ Title = "Extra",      Icon = "plus" })
 
 pcall(function()
---// Auto Block (Original FluxSaken - QueryHitbox / Sound / Anim based) //
+--// Auto Block (Original FluxSaken — QueryHitbox / Sound / Anim based) //
 AddSection(TabAutoBlock, "Original Auto Block")
 AddToggle(TabAutoBlock, "AutoBlock", "Auto Block", false, function(v)
     SetAutoBlock(v)
@@ -5354,10 +5288,10 @@ AddToggle(TabAutoBlock, "G1337_TrueDash", "True Dash Punch", false, function(v) 
 AddToggle(TabAutoBlock, "G1337_ShowPunchRange", "Show Punch Range ESP", false, function(v) getgenv().AutoPunch.ShowRange = v end)
 AddSlider(TabAutoBlock, "G1337_AutoPunchRange", "Auto Punch Range (studs)", 10, 120, 50, 1, function(v) getgenv().AutoPunch.Range = v end)
 AddSection(TabAutoBlock, "HD Tech")
-AddToggle(TabAutoBlock, "G1337_HDPull", "Enable HD Pull", false, function(v) if G1337 and G1337.settings then G1337.settings.hd = v end end)
-AddSlider(TabAutoBlock, "G1337_HDSpeed", "HD Speed", 1, 20, 12, 1, function(v) if G1337 and G1337.settings then G1337.settings.hdSpeed = v end end)
+AddToggle(TabAutoBlock, "G1337_HDPull", "Enable HD Pull", false, function(v) G1337.settings.hd = v end)
+AddSlider(TabAutoBlock, "G1337_HDSpeed", "HD Speed", 1, 20, 12, 1, function(v) G1337.settings.hdSpeed = v end)
 AddSection(TabAutoBlock, "Sphere ESP")
-AddSlider(TabAutoBlock, "G1337_SphereRange", "Range (studs)", 5, 50, 11, 1, function(v) if G1337 and G1337.settings then G1337.settings.sphereRange = v end end)
+AddSlider(TabAutoBlock, "G1337_SphereRange", "Range (studs)", 5, 50, 11, 1, function(v) G1337.settings.sphereRange = v end)
 AddToggle(TabAutoBlock, "G1337_SphereESP", "Sphere ESP", false, function(v)
     G1337.settings.sphereEsp = v
     if not v then for _,s in pairs(G1337.spheres) do pcall(function() s:Destroy() end) end G1337.spheres = {} end
@@ -5367,8 +5301,8 @@ AddToggle(TabAutoBlock, "G1337_CustomESP", "Custom ESP", false, function(v)
     G1337.settings.customEsp = v
     if not v then for _,b in pairs(G1337.boxes) do pcall(function() b:Destroy() end) end G1337.boxes = {} end
 end)
-AddSlider(TabAutoBlock, "G1337_BoxLength", "Length (studs)", 1, 50, 15, 1, function(v) if G1337 and G1337.settings then G1337.settings.boxLength = v end end)
-AddSlider(TabAutoBlock, "G1337_BoxWidth", "Width (studs)", 1, 50, 6, 1, function(v) if G1337 and G1337.settings then G1337.settings.boxWidth = v end end)
+AddSlider(TabAutoBlock, "G1337_BoxLength", "Length (studs)", 1, 50, 15, 1, function(v) G1337.settings.boxLength = v end)
+AddSlider(TabAutoBlock, "G1337_BoxWidth", "Width (studs)", 1, 50, 6, 1, function(v) G1337.settings.boxWidth = v end)
 
 --// Veeronica //
 
@@ -5376,9 +5310,8 @@ end)
 pcall(function()
 AddSection(TabVeeronica, "Veeronica Scripts")
 AddToggle(TabVeeronica, "VR_AutoTrick", "Auto Trick", false, function(v)
-    if not VR then return end
     VR.enabled = v
-    if v then pcall(function() VR.startManager() end) else pcall(function() VR.stopManager() end) end
+    if v then VR.startManager() else VR.stopManager() end
 end)
 AddButton(TabVeeronica, "Skate Controller", function()
     loadstring(game:HttpGet("https://pastebin.com/raw/MzKS5uvm"))()
@@ -5391,10 +5324,9 @@ pcall(function()
 AddSection(TabElliot, "Elliot - Infinite Rush Hour")
 AddSlider(TabElliot, "EL_CooldownTime", "Rush Hour Cooldown (s)", 1, 30, 6, 1, function(v) EL.cooldownTime = v end)
 AddToggle(TabElliot, "EL_EnableRush", "Enable Infinite Rush Hour", false, function(v)
-    if not EL then return end
     EL.rushEnabled = v
     if v then
-        pcall(function() EL.createRushUI() end)
+        EL.createRushUI()
         if EL.rushFrame then EL.rushFrame.Visible = true end
     else
         if EL.rushFrame then EL.rushFrame.Visible = false end
@@ -5545,13 +5477,13 @@ AddToggle(TabSurvivor, "ChanceCoinFlip", "Auto Coin Flip (away from killers)", f
 SA.AddUI(TabSurvivor, SA.Dusekkar, "Dusekkar", "Dusekkar")
 
 --// Jane Doe //
-AddSection(TabSurvivor, "Jane Doe - Crystal Auto-Fire")
+AddSection(TabSurvivor, "Jane Doe — Crystal Auto-Fire")
 AddToggle(TabSurvivor, "JD_Enabled", "Enable Jane Doe Aimbot", false, function(On) Feature.JD_SetEnabled(On) end)
 AddToggle(TabSurvivor, "JD_SilentAim", "Aimbot (Silent Aim)", false, function(On) Feature.JD_SetAimbot(On) end)
 AddSlider(TabSurvivor, "JD_AimOffset", "Aim Offset (Y)", -5, 5, -0.3, 0.1, function(v) if JD then JD.AimOffset = v end end)
 AddSlider(TabSurvivor, "JD_Prediction", "Prediction", 0, 1, 0.6, 0.01, function(v) if JD then JD.Prediction = v end end)
 
-AddSection(TabSurvivor, "Jane Doe - Instant Max Charge Crystal")
+AddSection(TabSurvivor, "Jane Doe — Instant Max Charge Crystal")
 AddToggle(TabSurvivor, "JD_InstaThrow", "Instant Max Charge Crystal", false, function(On) Feature.JD_SetInstaThrow(On) end)
 pcall(function()
     TabSurvivor:Paragraph({ Title = "Info", Desc = "Sets the Crystal min/max charge time to 0.01s each time the ability fires. Turning it off restores the original values." })
@@ -5561,11 +5493,11 @@ pcall(function()
     TabSurvivor:Paragraph({ Title = "Info", Desc = "Removes the max hold time so the crystal stays held until you release it. Releasing still throws normally." })
 end)
 
-AddSection(TabSurvivor, "Jane Doe - Axe Lock-On")
+AddSection(TabSurvivor, "Jane Doe — Axe Lock-On")
 AddToggle(TabSurvivor, "JD_AxeEnabled", "Enable Axe Lock-On", false, function(On) if JD then JD.Axe = On end end)
 AddSlider(TabSurvivor, "JD_AxeLockDur", "Lock Duration (s)", 0.5, 3, 1.7, 0.1, function(v) if JD then JD.AxeDuration = v end end)
 
-AddSection(TabSurvivor, "Jane Doe - Control")
+AddSection(TabSurvivor, "Jane Doe — Control")
 AddButton(TabSurvivor, "Unload Jane Doe", function() Feature.JD_Unload() end)
 
 --// Killer Tab //
@@ -6024,7 +5956,7 @@ local function ShedStopLoop()
     for k in pairs(Shed.lastFire) do Shed.lastFire[k] = nil end
 end
 
--- Main heartbeat loop - scans ALL killers in range and slashes each independently
+-- Main heartbeat loop — scans ALL killers in range and slashes each independently
 local function ShedStartLoop()
     if Shed.loopConn then return end
     Shed.loopConn = RunService.Heartbeat:Connect(function()
@@ -6217,7 +6149,7 @@ AddButton(TabInfo, "Copy Discord Link", function()
     if Copied then
         Notify("Discord", "Link copied to clipboard!", 3)
     else
-        Notify("Discord", "Could not copy - executor may not support clipboard", 3)
+        Notify("Discord", "Could not copy — executor may not support clipboard", 3)
     end
 end)
 
@@ -6227,56 +6159,9 @@ end)
 
 if LocalPlayer.Character then task.spawn(OnCharacter, LocalPlayer.Character) end
 
-Notify("Flex Saken", "Loaded v" .. Version .. " - Crimson Edition ✦", 5)
+Notify("Flex Saken", "Loaded v" .. Version .. " — Crimson Edition ✦", 5)
 pcall(function()
     -- force UI to paint all tabs (some WindUI builds lag sidebar until toggle)
     if Window and Window.Open then Window:Open() end
 end)
-
---// FINAL TAB GUARANTEE: if earlier code errored, still ensure every tab exists //
-pcall(function()
-    local function ensureTab(title, icon)
-        -- WindUI has no public GetTabs on all builds; try create and ignore dup errors
-        local ok, tab = pcall(function()
-            return Window:Tab({ Title = title, Icon = icon })
-        end)
-        if ok and tab then return tab end
-        return nil
-    end
-    ensureTab("ESP", "eye")
-    ensureTab("Auto Block", "shield")
-    ensureTab("Veeronica", "star")
-    ensureTab("Elliot", "zap")
-    ensureTab("Misc", "settings")
-    ensureTab("Visual", "sparkles")
-    ensureTab("Movement", "arrow-up")
-    ensureTab("Survivor", "user")
-    ensureTab("Killer", "skull")
-    ensureTab("Two Time", "sword")
-    ensureTab("Extra", "plus")
-    ensureTab("Shedletsky", "swords")
-    ensureTab("Freeze Hitbox", "crosshair")
-    ensureTab("Info", "info")
-    print("[FlexSaken] Final tab guarantee ran")
-    pcall(function() if Window.Open then Window:Open() end end)
-    Notify("Flex Saken", "Menu ready - scroll tabs if some are off-screen", 5)
-end)
-
-print("[FlexSaken] UI bootstrap complete - tabs: AutoBlock, Veeronica, Elliot, Misc, Visual, Movement, Survivor, Killer, TwoTime, Extra, Shedletsky, Freeze, Info, ESP")
-if #LoadFailures > 0 then
-    warn("[FlexSaken] " .. #LoadFailures .. " feature block(s) failed to load:")
-    for _, msg in ipairs(LoadFailures) do warn("  - " .. msg) end
-    pcall(function()
-        Notify("Flex Saken", #LoadFailures .. " feature(s) failed - check F9 console", 6)
-    end)
-else
-    print("[FlexSaken] All Risky feature blocks loaded")
-end
-task.spawn(function()
-    for _ = 1, 20 do
-        if Remote then break end
-        pcall(RefreshFolders)
-        task.wait(0.5)
-    end
-    if Remote then print("[FlexSaken] Network remote ready") else warn("[FlexSaken] Network remote still missing - ability fires may no-op") end
-end)
+print("[FlexSaken] UI bootstrap complete — tabs: AutoBlock, Veeronica, Elliot, Misc, Visual, Movement, Survivor, Killer, TwoTime, Extra, Shedletsky, Freeze, Info, ESP")
